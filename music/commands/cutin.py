@@ -20,14 +20,15 @@ class CutinCommandMixin:
 
         Args:
             ctx (commands.Context): Discord 指令呼叫上下文。
-            query (str): 歌曲搜尋關鍵字或直接播放網址。
+            query (Optional[str]): 歌曲搜尋關鍵字或直接播放網址。
 
         Returns:
             None.
 
         Notes:
-            若當前有音樂正在播放，該歌曲會被暫停並移動至佇列最前端，
-            新插入的歌曲將立刻成為目前的播放項目。
+            利用 Player Loop 的機制：先將原歌曲退回佇列前端，
+            再將新歌曲放入佇列最前端，最後透過 stop() 觸發換歌，
+            避免與底層非同步迴圈發生狀態衝突。
         """
         if not query:
             return await ctx.send("❌ 請提供要插播的歌曲名稱或 URL。")
@@ -49,19 +50,25 @@ class CutinCommandMixin:
             song_info = self.extract_info(data[0])
             player = get_player(ctx)
 
-            # 插播邏輯：若有音樂在播放，將現有歌曲放回佇列最前，並替換 current
+            # 插播邏輯：順應 Player Loop 的抓取機制
             if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
                 if player.current:
+                    # 1. 先將原本正在播放的歌塞回佇列最前方 (index 0)
                     player.queue.insert(0, player.current)
 
-                player.current = song_info  # 直接替換當前歌曲
-                ctx.voice_client.stop()  # 觸發 FFmpeg 切歌流程
-                await msg.edit(
-                    content=f"🎶 已將 **{song_info['title']}** 插播並開始播放！原歌曲已排到下一首。"
-                )
+                    # 2. 再將這首「插播」的新歌塞到佇列的最前方 (變成新的 index 0, 原歌曲變為 index 1)
+                    player.queue.insert(0, song_info)
+
+                    # 3. 停止目前的播放。這會觸發 MusicPlayer 的底層 loop，自動抓取 queue[0] (也就是新歌) 進行播放
+                    ctx.voice_client.stop()
+
+                    await msg.edit(
+                        content=f"🎶 已將 **{song_info['title']}** 插播並開始播放！原歌曲已排到下一首。"
+                    )
             else:
+                # 如果目前沒在播歌，就當作一般點歌流程處理
                 await player.add_to_queue(song_info, ctx)
-                await msg.edit(content=f"正在播放 \"{song_info['title']}\"。")
+                await msg.edit(content=f"🎶 正在播放 \"{song_info['title']}\"。")
 
         except Exception as e:
             await msg.edit(content=f"⚠️ 插播歌曲時發生錯誤。錯誤訊息: `{e}`")

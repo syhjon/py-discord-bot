@@ -1,6 +1,7 @@
 # music/commands/saveplaylist.py - 提供儲存目前播放狀態為播放清單功能的指令 Mixin
 import json
 import os
+import re
 from typing import Optional
 from discord.ext import commands
 
@@ -16,7 +17,7 @@ class SavePlaylistCommandMixin:
     async def saveplaylist_command(
         self, ctx: commands.Context, *, playlist_name: Optional[str] = None
     ) -> None:
-        """將目前的播放狀態（包含當前歌曲與佇列）儲存為使用者命名的播放清單。
+        """將目前的播放狀態（包含當前歌曲與佇列）儲存為單一獨立的播放清單檔案。
 
         Args:
             ctx (commands.Context): Discord 指令呼叫上下文。
@@ -26,8 +27,8 @@ class SavePlaylistCommandMixin:
             None.
 
         Notes:
-            播放清單會以 JSON 格式儲存在專案目錄下的 `playlists` 資料夾中，並以 Discord
-            使用者 ID 分隔，確保各使用者的資料獨立性。
+            檔案將會儲存在 `playlists/` 目錄下，命名格式為 `{user_id}_{playlist_name}.json`，
+            以此確保每位使用者的播放清單獨立且不會互相覆蓋。
         """
         if not playlist_name:
             return await ctx.send(
@@ -38,23 +39,30 @@ class SavePlaylistCommandMixin:
         if not player.queue and not player.current:
             return await ctx.send("目前播放佇列中沒有歌曲，無法儲存。")
 
-        # 讀取現有儲存資料
-        file_path = os.path.join(self.playlists_dir, f"playlists_{ctx.author.id}.json")
-        data = {}
-        if os.path.exists(file_path):
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+        # 延遲初始化：確保 playlists 資料夾存在，避免 AttributeError
+        playlists_dir = os.path.join(os.getcwd(), "playlists")
+        os.makedirs(playlists_dir, exist_ok=True)
+
+        # 檔案名稱清理：過濾掉作業系統不允許的非法路徑字元，防止路徑穿越 (Path Traversal) 或寫入錯誤
+        safe_playlist_name = re.sub(r'[\\/*?:"<>|]', "_", playlist_name).strip()
+        if not safe_playlist_name:
+            return await ctx.send("❌ 播放清單名稱包含過多無效字元，請更換一個名稱。")
+
+        # 建構獨立的檔案路徑，例如：00000_boo.json
+        file_path = os.path.join(
+            playlists_dir, f"{ctx.author.id}_{safe_playlist_name}.json"
+        )
 
         # 收集當前播放歌曲與佇列中的歌曲
         save_list = []
         if player.current:
             save_list.append(
                 {
-                    "name": player.current["title"],
-                    # 優先使用永久網址，若無則退回使用 url
-                    "url": player.current.get("webpage_url", player.current["url"]),
-                    "duration": player.current.get("duration") or 0,
-                    "uploader": player.current.get("uploader") or "未知",
+                    "name": player.current.get("title", "未知標題"),
+                    # 優先使用永久網址 (webpage_url)，若無則退回使用 url
+                    "url": player.current.get("webpage_url", player.current.get("url")),
+                    "duration": player.current.get("duration", 0),
+                    "uploader": player.current.get("uploader", "未知"),
                     "thumbnail": player.current.get("thumbnail"),
                 }
             )
@@ -62,17 +70,19 @@ class SavePlaylistCommandMixin:
         for song in player.queue:
             save_list.append(
                 {
-                    "name": song["title"],
-                    "url": song.get("webpage_url", song["url"]),
-                    "duration": song.get("duration") or 0,
-                    "uploader": song.get("uploader") or "未知",
+                    "name": song.get("title", "未知標題"),
+                    "url": song.get("webpage_url", song.get("url")),
+                    "duration": song.get("duration", 0),
+                    "uploader": song.get("uploader", "未知"),
                     "thumbnail": song.get("thumbnail"),
                 }
             )
 
-        # 更新並寫入檔案
-        data[playlist_name] = save_list
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-        await ctx.send(f"✅ 已將目前的佇列儲存為播放清單：{playlist_name}")
+        # 直接將陣列寫入使用者的專屬播放清單檔案
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(save_list, f, ensure_ascii=False, indent=2)
+            await ctx.send(f"✅ 已將目前的佇列儲存為播放清單：**{playlist_name}**")
+        except Exception as e:
+            print(f"SavePlaylist Error: {e}")
+            await ctx.send("⚠️ 儲存播放清單時發生系統錯誤，請稍後再試。")
