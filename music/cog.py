@@ -5,6 +5,7 @@
 有效避免單一檔案過於龐大的「上帝物件 (God Object)」反模式，提升程式碼的可維護性。
 """
 
+import asyncio
 from discord.ext import commands
 
 from music.commands import (
@@ -46,6 +47,7 @@ from music.services import (
     ensure_playlists_dir,
     get_playlists_dir,
 )
+from music.player import players
 
 
 class Music(
@@ -113,3 +115,23 @@ class Music(
         # 確保個人播放清單的儲存目錄存在
         self.playlists_dir: str = get_playlists_dir(__file__)
         ensure_playlists_dir(self.playlists_dir)
+
+    async def cog_unload(self) -> None:
+        """當 Cog 被卸載或機器人關閉時，觸發安全清理邏輯。
+
+        Args:
+            無。
+
+        Returns:
+            None.
+
+        Notes:
+            透過非同步任務呼叫每一個活躍播放器的 cleanup 方法，
+            確保 FFmpeg 程序與背景任務被妥善關閉，避免產生殭屍進程 (-9 錯誤)。
+        """
+        cleanup_tasks = [player.cleanup() for player in players.values()]
+        if cleanup_tasks:
+            await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+
+        players.clear()
+        print("✅ 音樂播放系統已安全卸載，所有連線與程序皆已關閉。")

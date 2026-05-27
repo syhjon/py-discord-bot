@@ -3,7 +3,7 @@
 此模組為 Discord 機器人的主程式進入點。
 負責載入環境變數、初始化核心服務 (如日誌)、定義事件攔截器，並啟動機器人。
 """
-
+import logging  # 確保有匯入 logging
 import asyncio
 import os
 from typing import Any
@@ -17,6 +17,11 @@ from core.logger import setup_logging
 
 # 1. 啟動全域日誌系統
 log = setup_logging("MusicBot")
+
+# ====== 新增這兩行來靜音 discord.py 底層的 INFO 日誌 ======
+logging.getLogger("discord.player").setLevel(logging.WARNING)
+logging.getLogger("discord.voice_state").setLevel(logging.WARNING)
+# =======================================================
 
 # 2. 載入環境變數與 Discord 設定
 load_dotenv()

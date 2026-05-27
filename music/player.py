@@ -43,7 +43,30 @@ class MusicPlayer:
 
         self.ytdl = create_player_ytdl()
 
-        self.bot.loop.create_task(self.player_loop())
+        # 將背景任務存為實例變數，方便後續安全取消
+        self.player_task = self.bot.loop.create_task(self.player_loop())
+
+    async def cleanup(self) -> None:
+        """清理播放器資源，優雅關閉 FFmpeg 與背景任務。"""
+        self.queue.clear()
+        self.loop_mode = 0
+
+        # 若有動態歌詞任務，予以安全取消
+        if hasattr(self, "lyrics_task") and self.lyrics_task:
+            self.lyrics_task.cancel()
+
+        # 安全停止音樂與斷開連線，這會讓 discord.py 正常發送 SIGTERM 給 FFmpeg
+        if self.guild.voice_client:
+            if (
+                self.guild.voice_client.is_playing()
+                or self.guild.voice_client.is_paused()
+            ):
+                self.guild.voice_client.stop()
+            await self.guild.voice_client.disconnect(force=False)
+
+        # 取消主播放迴圈任務
+        if self.player_task and not self.player_task.done():
+            self.player_task.cancel()
 
     def pause_time(self) -> None:
         """記錄播放暫停時的時間戳記。
@@ -147,121 +170,130 @@ class MusicPlayer:
             應用跳轉偏移量並自動處理播放完畢後的循環模式。
         """
         await self.bot.wait_until_ready()
-        while not self.bot.is_closed():
-            self.next.clear()
+        try:
+            while not self.bot.is_closed():
+                self.next.clear()
 
-            if not self.current and len(self.queue) == 0:
-                await asyncio.sleep(1)
-                continue
-
-            # 如果沒有設定 current，從 queue 取歌
-            if not self.current and len(self.queue) > 0:
-                self.current = self.queue.pop(0)
-
-            # 如果網址不是 videoplayback 串流，代表它是從播放清單載入的永久網址，需即時解析
-            if "videoplayback" not in self.current["url"]:
-                try:
-                    loop = asyncio.get_event_loop()
-                    # 即時抓取最新鮮的串流網址
-                    data = await loop.run_in_executor(
-                        None,
-                        lambda: self.ytdl.extract_info(
-                            self.current["url"], download=False
-                        ),
-                    )
-
-                    # 更新成可以給 FFmpeg 播放的直連網址
-                    self.current["url"] = data["url"]
-
-                    # 若清單資料缺失則補齊資訊
-                    self.current["duration"] = data.get("duration") or self.current.get(
-                        "duration", 0
-                    )
-                    self.current["uploader"] = data.get("uploader") or self.current.get(
-                        "uploader", "未知"
-                    )
-                    if data.get("thumbnails"):
-                        self.current["thumbnail"] = data["thumbnails"][0]["url"]
-
-                except Exception as e:
-                    print(f"即時解析歌曲失敗: {e}")
-                    self.current = None
-                    self.bot.loop.call_soon_threadsafe(self.next.set)
+                if not self.current and len(self.queue) == 0:
+                    await asyncio.sleep(1)
                     continue
 
-            # 組裝 FFmpeg 選項 (必須將 -ss 放在 -reconnect 前面以提升跳轉速度)
-            before_opts = ""
-            if self.seek_offset > 0:
-                before_opts += f"-ss {int(self.seek_offset)} "
+                # 如果沒有設定 current，從 queue 取歌
+                if not self.current and len(self.queue) > 0:
+                    self.current = self.queue.pop(0)
 
-            before_opts += "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
-            ffmpeg_options = {"options": "-vn", "before_options": before_opts}
+                # 如果網址不是 videoplayback 串流，代表它是從播放清單載入的永久網址，需即時解析
+                if "videoplayback" not in self.current["url"]:
+                    try:
+                        loop = asyncio.get_event_loop()
+                        # 即時抓取最新鮮的串流網址
+                        data = await loop.run_in_executor(
+                            None,
+                            lambda: self.ytdl.extract_info(
+                                self.current["url"], download=False
+                            ),
+                        )
 
-            audio_source = discord.FFmpegPCMAudio(self.current["url"], **ffmpeg_options)
-            volume_source = discord.PCMVolumeTransformer(
-                audio_source, volume=self.volume
-            )
+                        # 更新成可以給 FFmpeg 播放的直連網址
+                        self.current["url"] = data["url"]
 
-            self.start_timestamp = time.time()
-            self.accumulated_pause = 0
-            self.pause_timestamp = 0
+                        # 若清單資料缺失則補齊資訊
+                        self.current["duration"] = data.get(
+                            "duration"
+                        ) or self.current.get("duration", 0)
+                        self.current["uploader"] = data.get(
+                            "uploader"
+                        ) or self.current.get("uploader", "未知")
+                        if data.get("thumbnails"):
+                            self.current["thumbnail"] = data["thumbnails"][0]["url"]
 
-            # 在播放前保存目前的跳轉偏移量，然後將實體偏移歸零
-            current_seek = self.seek_offset
-            self.current_song_start_offset = current_seek
-            self.seek_offset = 0
+                    except Exception as e:
+                        print(f"即時解析歌曲失敗: {e}")
+                        self.current = None
+                        self.bot.loop.call_soon_threadsafe(self.next.set)
+                        continue
 
-            def after_play(error: Exception) -> None:
-                """discord.py 播放完畢後的 Callback 函式。
+                # 組裝 FFmpeg 選項 (必須將 -ss 放在 -reconnect 前面以提升跳轉速度)
+                before_opts = ""
+                if self.seek_offset > 0:
+                    before_opts += f"-ss {int(self.seek_offset)} "
 
-                Args:
-                    error (Exception): 若播放中發生錯誤，此參數會包含錯誤資訊。
-
-                Returns:
-                    None.
-
-                Notes:
-                    此回呼在主執行緒外觸發，故透過 `call_soon_threadsafe` 來喚醒非同步迴圈。
-                """
-                finished_song = self.current
-                if error:
-                    print(f"播放錯誤: {error}")
-
-                if self.loop_mode == 0:  # 關閉循環
-                    if finished_song:
-                        self.history.append(finished_song)
-                        if len(self.history) > 20:
-                            self.history.pop(0)
-                    self.current = None
-                elif self.loop_mode == 1:  # 單曲循環
-                    pass
-                elif self.loop_mode == 2:  # 佇列循環
-                    if finished_song:
-                        self.queue.append(finished_song)
-                        self.history.append(finished_song)
-                    self.current = None
-
-                self.bot.loop.call_soon_threadsafe(self.next.set)
-
-            # 若非跳轉指令則發送播放面板
-            if current_seek == 0:
-                embed_kwargs = {
-                    "title": f"🎶 正在播放：{self.current['title']}",
-                    "color": discord.Color.green(),
-                }
-                if self.current.get("webpage_url"):
-                    embed_kwargs["url"] = self.current["webpage_url"]
-                embed = discord.Embed(**embed_kwargs)
-                embed.set_author(name=self.current.get("uploader", "未知"))
-                embed.description = (
-                    f"⏱️ 時長：{format_time(self.current.get('duration'))}"
+                before_opts += (
+                    "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
                 )
-                if self.current.get("thumbnail"):
-                    embed.set_thumbnail(url=self.current["thumbnail"])
-                await self.channel.send(embed=embed, view=PlayerControls(self))
+                ffmpeg_options = {"options": "-vn", "before_options": before_opts}
 
-            self.guild.voice_client.play(volume_source, after=after_play)
-            await self.next.wait()
+                audio_source = discord.FFmpegPCMAudio(
+                    self.current["url"], **ffmpeg_options
+                )
+                volume_source = discord.PCMVolumeTransformer(
+                    audio_source, volume=self.volume
+                )
+
+                self.start_timestamp = time.time()
+                self.accumulated_pause = 0
+                self.pause_timestamp = 0
+
+                # 在播放前保存目前的跳轉偏移量，然後將實體偏移歸零
+                current_seek = self.seek_offset
+                self.current_song_start_offset = current_seek
+                self.seek_offset = 0
+
+                def after_play(error: Exception) -> None:
+                    """discord.py 播放完畢後的 Callback 函式。
+
+                    Args:
+                        error (Exception): 若播放中發生錯誤，此參數會包含錯誤資訊。
+
+                    Returns:
+                        None.
+
+                    Notes:
+                        此回呼在主執行緒外觸發，故透過 `call_soon_threadsafe` 來喚醒非同步迴圈。
+                    """
+                    finished_song = self.current
+                    if error:
+                        print(f"播放錯誤: {error}")
+
+                    if self.loop_mode == 0:  # 關閉循環
+                        if finished_song:
+                            self.history.append(finished_song)
+                            if len(self.history) > 20:
+                                self.history.pop(0)
+                        self.current = None
+                    elif self.loop_mode == 1:  # 單曲循環
+                        pass
+                    elif self.loop_mode == 2:  # 佇列循環
+                        if finished_song:
+                            self.queue.append(finished_song)
+                            self.history.append(finished_song)
+                        self.current = None
+
+                    self.bot.loop.call_soon_threadsafe(self.next.set)
+
+                # 若非跳轉指令則發送播放面板
+                if current_seek == 0:
+                    embed_kwargs = {
+                        "title": f"🎶 正在播放：{self.current['title']}",
+                        "color": discord.Color.green(),
+                    }
+                    if self.current.get("webpage_url"):
+                        embed_kwargs["url"] = self.current["webpage_url"]
+                    embed = discord.Embed(**embed_kwargs)
+                    embed.set_author(name=self.current.get("uploader", "未知"))
+                    embed.description = (
+                        f"⏱️ 時長：{format_time(self.current.get('duration'))}"
+                    )
+                    if self.current.get("thumbnail"):
+                        embed.set_thumbnail(url=self.current["thumbnail"])
+                    await self.channel.send(embed=embed, view=PlayerControls(self))
+
+                self.guild.voice_client.play(volume_source, after=after_play)
+                await self.next.wait()
+
+        except asyncio.CancelledError:
+            # 捕捉任務取消例外，避免印出錯誤堆疊，確保安靜退出
+            pass
 
 
 players = {}
