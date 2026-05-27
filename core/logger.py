@@ -1,7 +1,7 @@
 # core/logger.py - 負責系統日誌的初始化與配置
 """
 此模組負責配置全域的日誌系統 (Logging)。
-提供終端機與檔案的雙向輸出，並內建檔案大小輪轉機制。
+提供終端機與檔案的雙向輸出，並內建檔案大小輪轉機制，確保日誌檔案不會無限膨脹。
 """
 
 import logging
@@ -20,6 +20,10 @@ def setup_logging(logger_name: str = "MusicBot") -> logging.Logger:
 
     Returns:
         logging.Logger: 系統的日誌記錄器實例。
+
+    Notes:
+        根日誌記錄器 (Root Logger) 僅會在系統啟動時設定一次。
+        日誌會同時輸出至終端機與 `logs/bot.log`，並啟用自動輪轉功能。
     """
     # 確保日誌存放的資料夾存在
     if not os.path.exists("logs"):

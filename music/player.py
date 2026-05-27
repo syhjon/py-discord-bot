@@ -1,4 +1,4 @@
-# player.py - 音樂播放器核心邏輯
+# music/player.py - 管理播放佇列、語音播放、循環模式與跳轉邏輯
 import asyncio
 import time
 
@@ -10,7 +10,20 @@ from music.utils import format_time
 
 
 class MusicPlayer:
-    def __init__(self, ctx):
+    """管理單一語音頻道（Guild）的音樂播放狀態。"""
+
+    def __init__(self, ctx: discord.ext.commands.Context) -> None:
+        """初始化該伺服器的播放器狀態。
+
+        Args:
+            ctx (discord.ext.commands.Context): 用於識別機器人、伺服器與文字頻道的上下文。
+
+        Returns:
+            None.
+
+        Notes:
+            此處會立即為該伺服器建立一個背景播放迴圈任務。
+        """
         self.bot = ctx.bot
         self.guild = ctx.guild
         self.channel = ctx.channel
@@ -26,23 +39,54 @@ class MusicPlayer:
         self.pause_timestamp = 0
         self.accumulated_pause = 0
         self.seek_offset = 0  # 用於傳遞給下一輪的跳轉指令
-        self.current_song_start_offset = (
-            0  # 👈 新增：用於記錄當前播放歌曲的起始偏移量，供進度條計算
-        )
+        self.current_song_start_offset = 0  # 記錄當前播放歌曲的起始偏移量，供進度條計算
 
         self.ytdl = create_player_ytdl()
 
         self.bot.loop.create_task(self.player_loop())
 
-    def pause_time(self):
+    def pause_time(self) -> None:
+        """記錄播放暫停時的時間戳記。
+
+        Args:
+            無。
+
+        Returns:
+            None.
+
+        Notes:
+            此時間戳記用於確保播放進度條在暫停與恢復時依然精準。
+        """
         self.pause_timestamp = time.time()
 
-    def resume_time(self):
+    def resume_time(self) -> None:
+        """播放恢復後，計算並累計暫停期間的時間差。
+
+        Args:
+            無。
+
+        Returns:
+            None.
+
+        Notes:
+            若播放器並未處於暫停狀態，則不會進行任何狀態變更。
+        """
         if self.pause_timestamp > 0:
             self.accumulated_pause += time.time() - self.pause_timestamp
             self.pause_timestamp = 0
 
-    def get_current_time(self):
+    def get_current_time(self) -> float:
+        """計算目前的播放位置（秒數）。
+
+        Args:
+            無。
+
+        Returns:
+            float: 目前的播放進度，包含跳轉 (seek) 的偏移量。
+
+        Notes:
+            若播放尚未開始，則回傳 0。
+        """
         if self.start_timestamp == 0:
             return 0
         if self.pause_timestamp > 0:
@@ -50,16 +94,36 @@ class MusicPlayer:
                 self.pause_timestamp
                 - self.start_timestamp
                 - self.accumulated_pause
-                + self.current_song_start_offset  # 👈 改用記錄這首歌實際起始點的變數
+                + self.current_song_start_offset
             )
         return (
             time.time()
             - self.start_timestamp
             - self.accumulated_pause
-            + self.current_song_start_offset  # 👈 改用記錄這首歌實際起始點的變數
+            + self.current_song_start_offset
         )
 
-    async def add_to_queue(self, song_info, ctx, insert_at_front=False, announce=True):
+    async def add_to_queue(
+        self,
+        song_info: dict,
+        ctx: discord.ext.commands.Context,
+        insert_at_front: bool = False,
+        announce: bool = True,
+    ) -> None:
+        """將歌曲資訊字典加入播放佇列。
+
+        Args:
+            song_info (dict): 包含標題、URL 及其他 metadata 的佇列項目。
+            ctx (discord.ext.commands.Context): 用於發送通知訊息的內容上下文。
+            insert_at_front (bool): 是否插入至佇列最前端。
+            announce (bool): 是否發送 Discord 加入佇列的通知訊息。
+
+        Returns:
+            None.
+
+        Notes:
+            插入至最前端的操作為靜默執行，因為呼叫者通常會自行處理回覆訊息。
+        """
         if insert_at_front:
             self.queue.insert(0, song_info)
         else:
@@ -69,7 +133,19 @@ class MusicPlayer:
                     f"✅ 已將 **{song_info['title']}** 加入播放佇列！ (目前排在第 {len(self.queue)} 首)"
                 )
 
-    async def player_loop(self):
+    async def player_loop(self) -> None:
+        """伺服器的音樂播放主迴圈。
+
+        Args:
+            無。
+
+        Returns:
+            None.
+
+        Notes:
+            此迴圈負責自動從佇列抓取歌曲、執行 YouTube 網址解析 (JIT)、
+            應用跳轉偏移量並自動處理播放完畢後的循環模式。
+        """
         await self.bot.wait_until_ready()
         while not self.bot.is_closed():
             self.next.clear()
@@ -82,7 +158,7 @@ class MusicPlayer:
             if not self.current and len(self.queue) > 0:
                 self.current = self.queue.pop(0)
 
-            # 如果網址不是 videoplayback 串流，代表它是從播放清單載入的永久網址，我們必須即時把它轉成串流
+            # 如果網址不是 videoplayback 串流，代表它是從播放清單載入的永久網址，需即時解析
             if "videoplayback" not in self.current["url"]:
                 try:
                     loop = asyncio.get_event_loop()
@@ -97,7 +173,7 @@ class MusicPlayer:
                     # 更新成可以給 FFmpeg 播放的直連網址
                     self.current["url"] = data["url"]
 
-                    # 如果原本清單裡沒有時長或封面，順便在這裡補齊
+                    # 若清單資料缺失則補齊資訊
                     self.current["duration"] = data.get("duration") or self.current.get(
                         "duration", 0
                     )
@@ -109,13 +185,11 @@ class MusicPlayer:
 
                 except Exception as e:
                     print(f"即時解析歌曲失敗: {e}")
-                    # 解析失敗就跳過這首歌，播下一首
                     self.current = None
                     self.bot.loop.call_soon_threadsafe(self.next.set)
                     continue
 
-            # 組裝 FFmpeg options (包含跳轉邏輯)
-            # 👈 關鍵修正 1：FFmpeg 參數順序，-ss 必須放在 reconnect 的前面！
+            # 組裝 FFmpeg 選項 (必須將 -ss 放在 -reconnect 前面以提升跳轉速度)
             before_opts = ""
             if self.seek_offset > 0:
                 before_opts += f"-ss {int(self.seek_offset)} "
@@ -132,15 +206,27 @@ class MusicPlayer:
             self.accumulated_pause = 0
             self.pause_timestamp = 0
 
-            # 👈 關鍵修正 2：在送出播放指令前，保存這次跳轉的秒數給進度條，然後將跳轉指令歸零
+            # 在播放前保存目前的跳轉偏移量，然後將實體偏移歸零
             current_seek = self.seek_offset
             self.current_song_start_offset = current_seek
             self.seek_offset = 0
 
-            def after_play(error):
+            def after_play(error: Exception) -> None:
+                """discord.py 播放完畢後的 Callback 函式。
+
+                Args:
+                    error (Exception): 若播放中發生錯誤，此參數會包含錯誤資訊。
+
+                Returns:
+                    None.
+
+                Notes:
+                    此回呼在主執行緒外觸發，故透過 `call_soon_threadsafe` 來喚醒非同步迴圈。
+                """
                 finished_song = self.current
                 if error:
                     print(f"播放錯誤: {error}")
+
                 if self.loop_mode == 0:  # 關閉循環
                     if finished_song:
                         self.history.append(finished_song)
@@ -148,17 +234,16 @@ class MusicPlayer:
                             self.history.pop(0)
                     self.current = None
                 elif self.loop_mode == 1:  # 單曲循環
-                    pass  # current 保持不變
+                    pass
                 elif self.loop_mode == 2:  # 佇列循環
                     if finished_song:
                         self.queue.append(finished_song)
                         self.history.append(finished_song)
                     self.current = None
 
-                # ⚠️ 這裡已經移除了 self.seek_offset = 0，因為我們移到上面去了
                 self.bot.loop.call_soon_threadsafe(self.next.set)
 
-            # 只在非跳轉 (seek) 時發送面板。注意這裡用 current_seek 判斷
+            # 若非跳轉指令則發送播放面板
             if current_seek == 0:
                 embed_kwargs = {
                     "title": f"🎶 正在播放：{self.current['title']}",
@@ -182,10 +267,20 @@ class MusicPlayer:
 players = {}
 
 
-def get_player(ctx):
+def get_player(ctx: discord.ext.commands.Context) -> MusicPlayer:
+    """取得該伺服器的專屬播放器實例。
+
+    Args:
+        ctx (discord.ext.commands.Context): 用於識別伺服器的內容上下文。
+
+    Returns:
+        MusicPlayer: 該伺服器活躍的播放器實例。
+
+    Notes:
+        若機器人被強制斷線但佇列內仍有歌曲，則會自動重建播放器實例。
+    """
     if ctx.guild.id not in players:
         players[ctx.guild.id] = MusicPlayer(ctx)
-    # 如果機器人被踢出頻道，重置 player
     if ctx.voice_client is None and len(players[ctx.guild.id].queue) > 0:
         players[ctx.guild.id] = MusicPlayer(ctx)
     return players[ctx.guild.id]

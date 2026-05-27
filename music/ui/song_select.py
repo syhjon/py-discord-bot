@@ -1,19 +1,43 @@
+# music/ui/song_select.py - 定義 YouTube 搜尋結果下拉選單
+from typing import Any, Dict, List
 import discord
 
 from music.utils import format_time
 
 
 class SongSelect(discord.ui.Select):
-    def __init__(self, top10_results, player, ctx):
-        self.top10 = top10_results
-        self.player = player
-        self.ctx = ctx
+    """用於選擇 YouTube 搜尋結果的下拉選單組件。"""
+
+    def __init__(
+        self,
+        top10_results: List[Dict[str, Any]],
+        player: Any,
+        ctx: discord.ext.commands.Context,
+    ) -> None:
+        """初始化歌曲選擇選單。
+
+        Args:
+            top10_results (List[Dict[str, Any]]): 原始的 yt-dlp 搜尋結果字典列表。
+            player (Any): 即將接收所選歌曲的 `MusicPlayer` 實例。
+            ctx (discord.ext.commands.Context): 創建選單的指令上下文。
+
+        Returns:
+            None.
+
+        Notes:
+            系統會自動處理標題長度截斷，以符合 Discord UI 元件的顯示限制。
+        """
+        self.top10: List[Dict[str, Any]] = top10_results
+        self.player: Any = player
+        self.ctx: discord.ext.commands.Context = ctx
 
         options = []
         for i, video in enumerate(self.top10):
+            # 處理標題長度，避免超過 Discord 選單上限
             title = video.get("title", "未知標題")
             if len(title) > 90:
                 title = title[:87] + "..."
+
             duration_str = format_time(video.get("duration", 0))
             uploader = video.get("uploader", "未知")
 
@@ -32,7 +56,18 @@ class SongSelect(discord.ui.Select):
             options=options,
         )
 
-    async def callback(self, interaction: discord.Interaction):
+    async def callback(self, interaction: discord.Interaction) -> None:
+        """處理使用者選擇歌曲後的動作。
+
+        Args:
+            interaction (discord.Interaction): Discord 下拉選單互動上下文。
+
+        Returns:
+            None.
+
+        Notes:
+            系統會驗證執行者是否為發起搜尋的使用者，確保操作權限。
+        """
         if interaction.user != self.ctx.author:
             return await interaction.response.send_message(
                 "❌ 你不能選擇別人搜尋的歌曲喔！", ephemeral=True
@@ -41,6 +76,7 @@ class SongSelect(discord.ui.Select):
         selected_index = int(self.values[0])
         selected_song = self.top10[selected_index]
 
+        # 封裝歌曲資訊
         song_info = {
             "url": selected_song["url"],
             "webpage_url": selected_song.get("webpage_url", selected_song.get("url")),
@@ -54,6 +90,7 @@ class SongSelect(discord.ui.Select):
             ),
         }
 
+        # 更新訊息狀態並將歌曲加入佇列
         await interaction.response.edit_message(
             content=f"✅ 已選擇歌曲：**{song_info['title']}**", view=None
         )

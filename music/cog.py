@@ -82,7 +82,7 @@ class Music(
     YouTubeServiceMixin,
     commands.Cog,
 ):
-    """音樂播放與語音 AI 助理的主要 Cog 類別。
+    """音樂播放與 Gemini 文字助理的主要 Cog 類別。
 
     此類別作為 `discord.py` 載入擴充功能（Extension）的進入點。
     它不直接實作具體邏輯，而是透過多重繼承 (Multiple Inheritance)
@@ -94,10 +94,17 @@ class Music(
 
         Args:
             bot (commands.Bot): Discord 機器人的核心實例，提供 API 操作與事件監聽。
+
+        Returns:
+            None.
+
+        Notes:
+            Service objects are created once per Cog instance and reused by
+            command mixins through `self`.
         """
         self.bot: commands.Bot = bot
 
-        # 初始化 Gemini 語音與文字問答服務
+        # 初始化 Gemini 文字問答服務
         self.gemini: GeminiService = GeminiService()
 
         # 初始化搜尋專用的 yt-dlp 實例（此實例為全域共用，避免重複消耗資源）

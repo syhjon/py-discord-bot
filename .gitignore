@@ -29,5 +29,6 @@ env/
 logs/
 *.log
 playlists/
+lyrics/
 *.mp3
 *.webm
