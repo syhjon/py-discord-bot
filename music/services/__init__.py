@@ -2,6 +2,7 @@
 from .gemini import GeminiService
 from .playlists import ensure_playlists_dir, get_playlists_dir
 from .youtube import YouTubeServiceMixin, create_player_ytdl, create_search_ytdl
+from .playback import process_track_request
 
 """
 services 套件
@@ -10,6 +11,7 @@ services 套件
 - GeminiService: 用於處理 AI 相關的音樂分析或互動。
 - playlists: 負責個人播放清單的儲存與路徑管理。
 - youtube: 封裝 YT-DLP 相關的播放器與搜尋設定。
+- playback: 集中處理點歌與插播的生命週期與資源管理，確保在網路延遲或意外中斷時不會產生殭屍進程佔用伺服器資源。
 """
 
 __all__ = [
@@ -19,4 +21,5 @@ __all__ = [
     "create_search_ytdl",
     "ensure_playlists_dir",
     "get_playlists_dir",
+    "process_track_request",
 ]
