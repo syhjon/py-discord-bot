@@ -108,7 +108,6 @@ class LyricsCommandMixin:
                             if response.status == 200:
                                 fetched_data = await response.json()
             except Exception as e:
-                # 攔截 503 或其他 Gemini 異常
                 print(f"Gemini API Error (503/Timeout): {e}")
                 await msg.edit(
                     content="⚠️ AI 服務目前滿載或無回應，自動啟動降級搜尋方案..."
@@ -117,7 +116,6 @@ class LyricsCommandMixin:
 
         # ==========================================
         # 階段二：降級方案 (傳統字串清理 + 模糊搜尋)
-        # 觸發條件：Gemini 503 當機、解析失敗、或是精確搜尋找不到歌詞
         # ==========================================
         if not fetched_data:
             clean_title = re.sub(
@@ -143,7 +141,7 @@ class LyricsCommandMixin:
                                 and isinstance(data_list, list)
                                 and len(data_list) > 0
                             ):
-                                fetched_data = data_list[0]  # 取最相關的第一筆結果
+                                fetched_data = data_list[0]
                         else:
                             return await msg.edit(
                                 content=f"⚠️ LRCLIB API 發生異常 (狀態碼: {response.status})"
@@ -185,9 +183,11 @@ class LyricsCommandMixin:
         if synced_lyrics:
             parsed_lyrics = self._parse_synced_lyrics(synced_lyrics)
             if parsed_lyrics:
+                # 確保舊的任務被確實取消
                 if hasattr(player, "lyrics_task") and player.lyrics_task:
                     player.lyrics_task.cancel()
 
+                # 指派新的任務給播放器
                 player.lyrics_task = asyncio.create_task(
                     self._sync_lyrics_task(
                         ctx, msg, player, parsed_lyrics, raw_url, title, artist
@@ -226,7 +226,10 @@ class LyricsCommandMixin:
         title: str,
         artist: str,
     ) -> None:
-        """背景任務：根據當前播放時間，動態更新 Embed 顯示的歌詞。"""
+        """背景任務：根據當前播放時間，動態更新 Embed 顯示的歌詞。
+
+        具備嚴格的生命週期監控，若被插播、跳過或停止，將會立即自毀。
+        """
         current_index = -2
         last_edit_time = 0.0
 
@@ -237,19 +240,32 @@ class LyricsCommandMixin:
 
         try:
             while player.current:
+                # 1. 檢查是否被切歌或插播 (URL 改變)，若是則立刻結束任務
                 current_url = player.current.get(
                     "webpage_url", player.current.get("url", "")
                 )
-
                 if current_url != target_url:
                     break
 
                 vc = ctx.voice_client
+
+                # 2. 檢查是否從語音頻道斷線
                 if not vc or not vc.is_connected():
                     break
 
+                # 3. 檢查播放狀態 (防範殭屍程序)
+                if not vc.is_playing():
+                    if vc.is_paused():
+                        # 若處於暫停狀態，進入極低耗能休眠，不執行歌詞進度計算
+                        await asyncio.sleep(0.5)
+                        continue
+                    else:
+                        # 既沒在播也沒在暫停，代表已經被 stop() 砍掉，立刻結束任務
+                        break
+
                 current_time = player.get_current_time()
 
+                # 計算目前應該顯示的歌詞句
                 target_index = -1
                 for i, (t, _) in enumerate(parsed_lyrics):
                     if current_time >= t:
@@ -257,6 +273,7 @@ class LyricsCommandMixin:
                     else:
                         break
 
+                # 更新 Discord 訊息 (限制最高刷新頻率為 1.5 秒以符合 API Rate Limit)
                 if target_index != current_index:
                     now = time.time()
                     if now - last_edit_time >= 1.5:
@@ -294,13 +311,16 @@ class LyricsCommandMixin:
                         except discord.errors.HTTPException:
                             pass
 
-                await asyncio.sleep(1)
+                # 將檢測頻率提升為 0.5 秒，使切歌或結束的感知更即時
+                await asyncio.sleep(0.5)
 
         except asyncio.CancelledError:
+            # 外部強制取消時安全退出
             pass
         except Exception as e:
             print(f"Sync Lyrics Task Error: {e}")
         finally:
+            # 確保任務結束時提供視覺回饋
             embed.description = "🛑 播放結束或已切換歌曲，動態歌詞停止。"
             try:
                 await msg.edit(embed=embed)

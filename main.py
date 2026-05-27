@@ -60,7 +60,7 @@ bot = CustomBot(command_prefix="!", intents=intents, help_command=None)
 
 @bot.event
 async def on_ready() -> None:
-    """當 Discord 標記機器人為就緒狀態後，記錄啟動訊息。
+    """當 Discord 標記機器人為就緒狀態後，記錄啟動訊息並發送上線通知。
 
     Args:
         無。
@@ -69,12 +69,43 @@ async def on_ready() -> None:
         None.
 
     Notes:
-        如果 Discord 重新建立 Gateway 連線，此事件可能會再次被觸發。
+        此事件會自動尋找機器人所在的每一個伺服器，並嘗試在系統頻道
+        或第一個可發言的文字頻道發送重啟完畢的通知。
     """
     log.info("====================================")
     log.info(f"登入成功！機器人 {bot.user} 已經上線。")
     log.info("全域事件監聽器已啟動。")
     log.info("====================================")
+
+    # 遍歷機器人加入的所有伺服器 (Guild)
+    for guild in bot.guilds:
+        # 優先尋找伺服器設定的「系統訊息頻道」
+        target_channel = guild.system_channel
+
+        # 若無系統頻道，或機器人沒有權限在該頻道發言，則尋找第一個可發言的文字頻道
+        if (
+            not target_channel
+            or not target_channel.permissions_for(guild.me).send_messages
+        ):
+            for channel in guild.text_channels:
+                if channel.permissions_for(guild.me).send_messages:
+                    target_channel = channel
+                    break
+
+        # 發送上線提示訊息
+        if target_channel:
+            try:
+                embed = discord.Embed(
+                    title="🟢 系統重啟完畢",
+                    description="各位好，音樂機器人已重新上線為您服務！\n請隨時輸入 `!help` 查看音樂指令。",
+                    color=discord.Color.green(),
+                )
+                await target_channel.send(embed=embed)
+                log.info(
+                    f"已在伺服器 [{guild.name}] 的頻道 [{target_channel.name}] 發送上線通知。"
+                )
+            except Exception as e:
+                log.error(f"無法在伺服器 [{guild.name}] 發送上線通知: {e}")
 
 
 @bot.event
@@ -87,10 +118,6 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError) 
 
     Returns:
         None.
-
-    Notes:
-        對於未知的指令，會發送友善的 Discord 訊息提示使用者；其他錯誤則會記錄包含
-        traceback 的完整資訊以便進行後續除錯。
     """
     if isinstance(error, commands.CommandNotFound):
         await ctx.send(f"❓ 未知的指令：`{ctx.message.content}`。")
@@ -100,17 +127,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError) 
 
 
 async def load_extensions() -> None:
-    """載入 `cogs` 目錄下的所有 Cog 擴充模組檔案。
-
-    Args:
-        無。
-
-    Returns:
-        None.
-
-    Notes:
-        `cogs` 目錄中的每個 `.py` 檔案都會被視為一個 discord.py 擴充功能並進行載入。
-    """
+    """載入 `cogs` 目錄下的所有 Cog 擴充模組檔案。"""
     for filename in os.listdir("./cogs"):
         if filename.endswith(".py"):
             await bot.load_extension(f"cogs.{filename[:-3]}")
@@ -118,17 +135,7 @@ async def load_extensions() -> None:
 
 
 async def main() -> None:
-    """在非同步上下文管理器 (Context Manager) 中啟動 Discord 機器人。
-
-    Args:
-        無。
-
-    Returns:
-        None.
-
-    Notes:
-        Discord Token 會從 `.env` 檔案中載入；若遺失 Token 則會記錄嚴重錯誤並阻止啟動。
-    """
+    """在非同步上下文管理器中啟動 Discord 機器人。"""
     async with bot:
         await load_extensions()
 
