@@ -9,17 +9,18 @@ from typing import Any, Dict, List, Tuple
 
 import aiohttp
 import discord
-from discord.ext import commands
+from discord import app_commands
 
+from music.context import InteractionContext
 from music.player import get_player
 
 
 class LyricsCommandMixin:
     """提供歌詞查詢指令與動態歌詞顯示的 Mixin 類別。"""
 
-    @commands.command(name="lyrics", aliases=["ly"], help="搜尋目前播放歌曲的歌詞")
-    async def lyrics_command(self, ctx: commands.Context) -> None:
-        """獲取當前播放歌曲的歌詞。具備本地快取、AI 解析與自動降級搜尋功能。
+    @app_commands.command(name="lyrics", description="搜尋目前播放歌曲的歌詞")
+    async def lyrics_command(self, interaction: discord.Interaction) -> None:
+        """獲取目前播放歌曲的歌詞。具備本地快取、AI 解析與自動降級搜尋功能。
 
         Args:
             ctx (commands.Context): Discord 指令呼叫上下文。
@@ -27,6 +28,7 @@ class LyricsCommandMixin:
         Returns:
             None.
         """
+        ctx = InteractionContext(interaction)
         player = get_player(ctx)
 
         if not player or not player.current:
@@ -36,14 +38,14 @@ class LyricsCommandMixin:
         lyrics_dir = os.path.join(os.getcwd(), "storage", "lyrics")
         os.makedirs(lyrics_dir, exist_ok=True)
 
-        # 1. 取得當前網址，並萃取 YouTube 影片 ID 作為檔名
+        # 1. 取得目前網址，並萃取 YouTube 影片 ID 作為檔名
         raw_url = player.current.get("webpage_url", player.current.get("url", ""))
         match = re.search(r"(?:v=|/)([0-9A-Za-z_-]{11})", raw_url)
         video_id = match.group(1) if match else None
 
         if not video_id:
             return await ctx.send(
-                "❌ 無法解析當前歌曲的 YouTube ID，無法建立歌詞快取。"
+                "❌ 無法解析目前歌曲的 YouTube ID，無法建立歌詞快取。"
             )
 
         cache_path = os.path.join(lyrics_dir, f"{video_id}.json")
@@ -97,7 +99,7 @@ class LyricsCommandMixin:
                 # 如果成功解析出歌名與歌手，嘗試使用精確 API
                 if track_name and artist_name:
                     await msg.edit(
-                        content=f"🔍 向資料庫請求精準匹配：**{track_name}** - **{artist_name}** ..."
+                        content=f"🔍 向資料庫請求精準配對：**{track_name}** - **{artist_name}** ..."
                     )
                     encoded_track = urllib.parse.quote(track_name)
                     encoded_artist = urllib.parse.quote(artist_name)
@@ -168,7 +170,7 @@ class LyricsCommandMixin:
 
     async def _process_and_display_lyrics(
         self,
-        ctx: commands.Context,
+        ctx: InteractionContext,
         msg: discord.Message,
         player: Any,
         data: Dict[str, Any],
@@ -218,7 +220,7 @@ class LyricsCommandMixin:
 
     async def _sync_lyrics_task(
         self,
-        ctx: commands.Context,
+        ctx: InteractionContext,
         msg: discord.Message,
         player: Any,
         parsed_lyrics: List[Tuple[float, str]],
@@ -226,7 +228,7 @@ class LyricsCommandMixin:
         title: str,
         artist: str,
     ) -> None:
-        """背景任務：根據當前播放時間，動態更新 Embed 顯示的歌詞。
+        """背景任務：根據目前播放時間，動態更新 Embed 顯示的歌詞。
 
         具備嚴格的生命週期監控，若被插播、跳過或停止，將會立即自毀。
         """
@@ -299,7 +301,7 @@ class LyricsCommandMixin:
                                     f"*{parsed_lyrics[target_index - 1][1]}*"
                                 )
 
-                            # 當前句 (加粗與指示號)
+                            # 目前句 (加粗與指示號)
                             lines_to_show.append(
                                 f"**▶ {parsed_lyrics[target_index][1]}**"
                             )

@@ -1,14 +1,16 @@
 # music/commands/previous.py - 提供播放上一首歌曲功能的指令 Mixin
-from discord.ext import commands
+import discord
+from discord import app_commands
 
+from music.context import InteractionContext
 from music.player import get_player
 
 
 class PreviousCommandMixin:
     """提供上一首歌曲指令的 Mixin 類別。"""
 
-    @commands.command(name="previous", help="播放上一首歌曲")
-    async def previous_command(self, ctx: commands.Context) -> None:
+    @app_commands.command(name="previous", description="播放上一首歌曲")
+    async def previous_command(self, interaction: discord.Interaction) -> None:
         """將歷史紀錄中的上一首歌曲移回播放狀態。
 
         Args:
@@ -18,8 +20,9 @@ class PreviousCommandMixin:
             None.
 
         Notes:
-            系統會將當前正在播放的歌曲移回佇列最前端，並將歷史紀錄中的最後一首歌曲設定為當前播放項目。
+            系統會將目前正在播放的歌曲移回佇列最前端，並將歷史紀錄中的最後一首歌曲設定為目前播放項目。
         """
+        ctx = InteractionContext(interaction)
         player = get_player(ctx)
 
         if not player.history:
@@ -27,11 +30,11 @@ class PreviousCommandMixin:
 
         last_song = player.history.pop()
 
-        # 將當前播放的歌曲塞回佇列最前
+        # 將目前播放的歌曲塞回佇列最前
         if player.current:
             player.queue.insert(0, player.current)
 
-        # 強制將上一首歌曲設定為當前播放
+        # 強制將上一首歌曲設定為目前播放
         player.current = last_song
 
         # 若目前有播放中或暫停中的音訊，執行停止以觸發自動重新播放

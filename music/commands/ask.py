@@ -1,5 +1,8 @@
 # music/commands/ask.py - 提供 Gemini 文字提問功能的指令 Mixin
-from discord.ext import commands
+import discord
+from discord import app_commands
+
+from music.context import InteractionContext
 
 
 def split_message(text: str, limit: int = 1900) -> list[str]:
@@ -32,12 +35,9 @@ def split_message(text: str, limit: int = 1900) -> list[str]:
 class AskCommandMixin:
     """提供 Gemini 文字助理指令的 Mixin 類別。"""
 
-    @commands.command(
-        name="ask",
-        aliases=["gemini", "ai"],
-        help="使用 Gemini 問問題並回覆文字",
-    )
-    async def ask_command(self, ctx: commands.Context, *, question: str = None) -> None:
+    @app_commands.command(name="ask", description="使用 Gemini 問問題並回覆文字")
+    @app_commands.describe(question="請輸入要問 Gemini 的問題")
+    async def ask_command(self, interaction: discord.Interaction, question: str) -> None:
         """向 Gemini 提出問題並發送文字回覆。
 
         Args:
@@ -50,8 +50,9 @@ class AskCommandMixin:
         Notes:
             此指令僅用於純文字對話，不涉及語音頻道的連接或使用。
         """
+        ctx = InteractionContext(interaction)
         if not question:
-            return await ctx.send("請提供要問 Gemini 的問題。\n用法: !ask <問題>")
+            return await ctx.send("請提供要問 Gemini 的問題。\n用法: /ask <問題>")
 
         # 檢查 AI 服務配置
         if not hasattr(self, "gemini") or not self.gemini.is_configured:

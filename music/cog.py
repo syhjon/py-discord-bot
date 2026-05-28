@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import discord
 from discord.ext import commands
 
 from music.commands import (
@@ -117,6 +118,16 @@ class Music(
         # 確保個人播放清單的儲存目錄存在
         self.playlists_dir: str = get_playlists_dir(__file__)
         ensure_playlists_dir(self.playlists_dir)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """限制音樂指令只能在 Discord 伺服器內使用。"""
+        if interaction.guild is not None:
+            return True
+
+        await interaction.response.send_message(
+            "❌ 音樂指令只能在伺服器頻道中使用。", ephemeral=True
+        )
+        return False
 
     async def cog_unload(self) -> None:
         """當 Cog 被卸載或機器人關閉時，觸發安全清理邏輯。

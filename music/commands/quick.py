@@ -1,17 +1,18 @@
 # music/commands/quick.py - 提供快速播放功能的指令 Mixin
-from typing import Optional
-from discord.ext import commands
+import discord
+from discord import app_commands
 
+from music.context import InteractionContext
 from music.services.playback import process_track_request
 
 
 class QuickCommandMixin:
     """提供快速播放指令的 Mixin 類別。"""
 
-    @commands.command(name="quick", aliases=["fast"], help="直接搜尋最相關歌曲並播放")
-    async def quick_command(
-        self, ctx: commands.Context, *, query: Optional[str] = None
-    ) -> None:
+    @app_commands.command(name="quick", description="直接搜尋最相關歌曲並播放")
+    @app_commands.describe(query="請輸入歌名或 YouTube 網址")
+    async def quick_command(self, interaction: discord.Interaction, query: str) -> None:
+        ctx = InteractionContext(interaction)
         if not query:
             return await ctx.send("❌ 請提供歌曲名稱或連結。")
 

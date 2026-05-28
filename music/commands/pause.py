@@ -1,14 +1,16 @@
 # music/commands/pause.py - 提供暫停播放功能的指令 Mixin
-from discord.ext import commands
+import discord
+from discord import app_commands
 
+from music.context import InteractionContext
 from music.player import get_player
 
 
 class PauseCommandMixin:
     """提供暫停指令的 Mixin 類別。"""
 
-    @commands.command(name="pause", help="暫停播放")
-    async def pause_command(self, ctx: commands.Context) -> None:
+    @app_commands.command(name="pause", description="暫停播放")
+    async def pause_command(self, interaction: discord.Interaction) -> None:
         """若有音訊正在播放，則暫停目前的語音播放。
 
         Args:
@@ -20,6 +22,7 @@ class PauseCommandMixin:
         Notes:
             此指令會記錄暫停時間點，確保播放進度條的顯示狀態在暫停期間保持準確。
         """
+        ctx = InteractionContext(interaction)
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
             get_player(ctx).pause_time()

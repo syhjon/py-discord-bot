@@ -1,16 +1,17 @@
 # music/commands/playat.py - 提供佇列跳轉播放功能的指令 Mixin
-from typing import Optional
-from discord.ext import commands
+import discord
+from discord import app_commands
+
+from music.context import InteractionContext
 
 
 class PlayatCommandMixin:
     """提供佇列跳轉播放指令的 Mixin 類別。"""
 
-    @commands.command(
-        name="playat", aliases=["pt"], help="立即播放佇列中指定編號的歌曲"
-    )
+    @app_commands.command(name="playat", description="立即播放佇列中指定編號的歌曲")
+    @app_commands.describe(index="佇列中的歌曲編號")
     async def playat_command(
-        self, ctx: commands.Context, index: Optional[int] = None
+        self, interaction: discord.Interaction, index: int
     ) -> None:
         """播放佇列中指定編號的歌曲。
 
@@ -22,7 +23,8 @@ class PlayatCommandMixin:
             None.
 
         Notes:
-            此指令將執行邏輯委派給 `jump_command`，確保 `!jump` 與 `!playat`
+            此指令將執行邏輯委派給 `jump_command`，確保 `/jump` 與 `/playat`
             在伺服器上的行為邏輯完全一致。
         """
-        await self.jump_command(ctx, index)
+        ctx = InteractionContext(interaction)
+        await self._jump_to_index(ctx, index)

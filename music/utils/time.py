@@ -26,14 +26,14 @@ def format_time(seconds: Union[int, float, str, None]) -> str:
 def create_progress_bar(
     current_time: Union[int, float], duration: Union[int, float, str, None]
 ) -> str:
-    """為當前播放的音軌建立純文字進度條。
+    """為目前播放的音軌建立純文字進度條。
 
     Args:
-        current_time (Union[int, float]): 當前播放位置（秒數）。
+        current_time (Union[int, float]): 目前播放位置（秒數）。
         duration (Union[int, float, str, None]): 音軌總時長（秒數）、`None`，或是特殊字串 `未知時長`。
 
     Returns:
-        str: 包含 20 個字元長度的進度條字串，並帶有當前位置的圖示標記。
+        str: 包含 20 個字元長度的進度條字串，並帶有目前位置的圖示標記。
 
     Notes:
         當音軌時長未知或為零時（例如直播串流），會回傳預設的防呆進度條，以避免發生除以零的錯誤 (ZeroDivisionError)。
@@ -42,7 +42,7 @@ def create_progress_bar(
         return "━" * 19 + "🔘"
 
     total_bars = 20
-    # 計算當前位置百分比並對應到 20 格
+    # 計算目前位置百分比並對應到 20 格
     current_bar = round((current_time / duration) * total_bars)
     current_bar = min(max(current_bar, 0), total_bars)
 

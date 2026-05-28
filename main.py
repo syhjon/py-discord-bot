@@ -8,6 +8,7 @@ import os
 from typing import Any
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
@@ -20,9 +21,10 @@ log = setup_logging("MusicBot")
 # 載入環境變數與 Discord 設定
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
+GUILD_ID = os.getenv("DISCORD_GUILD_ID")
 
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = False
 
 
 # ==========================================
@@ -30,6 +32,46 @@ intents.message_content = True
 # ==========================================
 class CustomBot(commands.Bot):
     """自訂的 Discord Bot 類別，用於全域事件攔截與日誌記錄。"""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.guild_commands_synced = False
+
+    async def clear_remote_global_commands(self) -> None:
+        """清除 Discord 端殘留的全域斜線指令，避免與 guild 指令重複顯示。"""
+        commands_snapshot = list(self.tree.get_commands())
+        if not commands_snapshot:
+            return
+
+        self.tree.clear_commands(guild=None)
+        cleared = await self.tree.sync()
+
+        for command in commands_snapshot:
+            self.tree.add_command(command, override=True)
+
+        log.info(
+            f"✅ 已清除 {len(cleared)} 個全域斜線指令；目前改用伺服器即時同步。"
+        )
+
+    async def setup_hook(self) -> None:
+        """載入 Cog 並同步 Discord 斜線指令。"""
+        await load_extensions()
+
+        if GUILD_ID:
+            try:
+                guild = discord.Object(id=int(GUILD_ID))
+            except ValueError:
+                log.error("DISCORD_GUILD_ID 必須是 Discord 伺服器 ID 的數字。")
+            else:
+                await self.clear_remote_global_commands()
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                log.info(f"✅ 已同步 {len(synced)} 個伺服器斜線指令。")
+                return
+
+        log.info(
+            "未設定 DISCORD_GUILD_ID，將在 on_ready 對已加入的伺服器同步斜線指令。"
+        )
 
     def dispatch(self, event_name: str, /, *args: Any, **kwargs: Any) -> None:
         """分派 Discord 事件並記錄高層級的活動日誌。
@@ -54,7 +96,9 @@ class CustomBot(commands.Bot):
 
 
 # 初始化機器人實例
-bot = CustomBot(command_prefix="!", intents=intents, help_command=None)
+bot = CustomBot(
+    command_prefix=commands.when_mentioned, intents=intents, help_command=None
+)
 
 
 @bot.event
@@ -76,6 +120,16 @@ async def on_ready() -> None:
     log.info("全域事件監聽器已啟動。")
     log.info("====================================")
 
+    if not GUILD_ID and not bot.guild_commands_synced:
+        await bot.clear_remote_global_commands()
+
+        for guild in bot.guilds:
+            guild_object = discord.Object(id=guild.id)
+            bot.tree.copy_global_to(guild=guild_object)
+            synced = await bot.tree.sync(guild=guild_object)
+            log.info(f"✅ 已在伺服器 [{guild.name}] 同步 {len(synced)} 個斜線指令。")
+        bot.guild_commands_synced = True
+
     # 遍歷機器人加入的所有伺服器 (Guild)
     for guild in bot.guilds:
         # 優先尋找伺服器設定的「系統訊息頻道」
@@ -96,7 +150,7 @@ async def on_ready() -> None:
             try:
                 embed = discord.Embed(
                     title="🟢 系統重啟完畢",
-                    description="各位好，音樂機器人已重新上線為您服務！\n請隨時輸入 `!help` 查看音樂指令。",
+                    description="各位好，音樂機器人已重新上線為您服務！\n請隨時輸入 `/help` 查看音樂指令。",
                     color=discord.Color.green(),
                 )
                 await target_channel.send(embed=embed)
@@ -107,22 +161,18 @@ async def on_ready() -> None:
                 log.error(f"無法在伺服器 [{guild.name}] 發送上線通知: {e}")
 
 
-@bot.event
-async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
-    """處理 discord.py 執行期間拋出的指令錯誤。
+@bot.tree.error
+async def on_app_command_error(
+    interaction: discord.Interaction, error: app_commands.AppCommandError
+) -> None:
+    """處理 Discord 斜線指令執行期間拋出的錯誤。"""
+    log.error(f"執行斜線指令時發生錯誤: {error}", exc_info=True)
+    message = "⚠️ 執行指令時發生錯誤，請稍後再試。"
 
-    Args:
-        ctx (commands.Context): 呼叫指令的上下文物件。
-        error (commands.CommandError): 解析或執行期間拋出的指令錯誤例外。
-
-    Returns:
-        None.
-    """
-    if isinstance(error, commands.CommandNotFound):
-        await ctx.send(f"❓ 未知的指令：`{ctx.message.content}`。")
-        log.warning(f"未知指令嘗試: {ctx.author} 嘗試執行 {ctx.message.content}")
+    if interaction.response.is_done():
+        await interaction.followup.send(message, ephemeral=True)
     else:
-        log.error(f"執行指令時發生錯誤: {error}", exc_info=True)
+        await interaction.response.send_message(message, ephemeral=True)
 
 
 async def load_extensions() -> None:
@@ -136,8 +186,6 @@ async def load_extensions() -> None:
 async def main() -> None:
     """在非同步上下文管理器中啟動 Discord 機器人。"""
     async with bot:
-        await load_extensions()
-
         if not TOKEN:
             log.critical(
                 "❌ 錯誤：找不到 DISCORD_TOKEN，請檢查 .env 檔案是否設定正確！"

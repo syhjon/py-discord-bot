@@ -13,7 +13,7 @@ The bot focuses on YouTube music playback, queue management, personal playlists,
 - **Personal playlists**: Save the current queue to a per-user JSON playlist and load it later.
 - **Now playing views**: Show the current track with a text progress bar.
 - **Lyrics lookup**: Search lyrics for the currently playing song.
-- **Gemini text assistant**: Ask Gemini questions with `!ask`, `!gemini`, or `!ai`. Responses are text-only.
+- **Gemini text assistant**: Ask Gemini questions with `/ask`. Responses are text-only.
 - **Structured logging**: Console and rotating file logs are handled through `core/logger.py`.
 - **Modular command layout**: Each command lives in its own file under `music/commands/`.
 
@@ -22,7 +22,7 @@ The bot focuses on YouTube music playback, queue management, personal playlists,
 - Python 3.10 or newer
 - FFmpeg installed and available in your system `PATH`
 - A Discord bot token
-- A Gemini API key if you want to use the `!ask` command
+- A Gemini API key if you want to use the `/ask` command
 
 On macOS, FFmpeg can be installed with Homebrew:
 
@@ -49,15 +49,16 @@ brew install ffmpeg
 
    ```env
    DISCORD_TOKEN=your_discord_bot_token_here
+   DISCORD_GUILD_ID=optional_test_server_id_for_fast_slash_sync
    GEMINI_API_KEY=your_gemini_api_key_here
    ```
 
-   `DISCORD_TOKEN` is required to run the bot. `GEMINI_API_KEY` is only required for Gemini text responses.
+   `DISCORD_TOKEN` is required to run the bot. `DISCORD_GUILD_ID` is optional; when set, slash commands sync instantly to that server for development. `GEMINI_API_KEY` is only required for Gemini text responses.
 
-4. Enable the required Discord developer portal settings:
+4. Invite the bot with the required Discord scopes and permissions:
 
-   - Turn on the **Message Content Intent** for your bot.
-   - Invite the bot with permissions for reading messages, sending messages, connecting to voice channels, and speaking in voice channels.
+   - Use both the `bot` and `applications.commands` scopes.
+   - Give it permissions for reading messages, sending messages, connecting to voice channels, and speaking in voice channels.
 
 ## Running The Bot
 
@@ -77,53 +78,53 @@ Stop the bot with `Ctrl+C`. The application catches the interrupt and shuts down
 
 ## Command Overview
 
-The default command prefix is `!`.
+Commands are registered as Discord slash commands. Type `/` in Discord to browse them.
 
 ### Music Search And Playback
 
-- `!song <query or url>`: Search YouTube and choose a result from a dropdown menu.
-- `!quick <query or url>` / `!fast` / `!play`: Play the most relevant result immediately.
-- `!cutin <query or url>` / `!insert` / `!插播` / `!pn`: Insert a track at the front and play it next.
+- `/song <query or url>`: Search YouTube and choose a result from a dropdown menu.
+- `/quick <query or url>`: Play the most relevant result immediately.
+- `/cutin <query or url>`: Insert a track at the front and play it next.
 
 ### Playback Controls
 
-- `!pause`: Pause the current track.
-- `!resume`: Resume playback.
-- `!stop` / `!leave` / `!停止`: Stop playback and disconnect from voice.
-- `!skip` / `!next` / `!跳過`: Skip the current track.
-- `!previous`: Play the previous track from history.
-- `!seek <seconds>`: Seek to a time position in the current track.
+- `/pause`: Pause the current track.
+- `/resume`: Resume playback.
+- `/stop`: Stop playback and keep the queue.
+- `/skip`: Skip the current track.
+- `/previous`: Play the previous track from history.
+- `/seek <seconds>`: Seek to a time position in the current track.
 
 ### Queue Controls
 
-- `!queue` / `!list`: Show the current queue.
-- `!clear` / `!clearqueue`: Clear the queue.
-- `!remove <index>` / `!rm` / `!刪除`: Remove a track from the queue.
-- `!shuffle` / `!random` / `!mix`: Shuffle the queue.
-- `!jump <index>`: Move a queued track to the front and play it next.
-- `!playat <index>` / `!pt`: Same behavior as `!jump`.
+- `/queue`: Show the current queue.
+- `/clear`: Clear the queue.
+- `/remove <index>`: Remove a track from the queue.
+- `/shuffle`: Shuffle the queue.
+- `/jump <index>`: Move a queued track to the front and play it next.
+- `/playat <index>`: Same behavior as `/jump`.
 
 ### Loop And Volume
 
-- `!loop off`: Disable looping.
-- `!loop song`: Loop the current song.
-- `!loop queue` or `!loop all`: Loop the full queue.
-- `!volume <0-100>`: Set volume.
-- `!volup`: Increase volume by 10%.
-- `!voldown`: Decrease volume by 10%.
-- `!volumecheck` / `!vol`: Show current volume.
-- `!mute`: Mute the bot.
-- `!unmute`: Restore the previous volume.
+- `/loop off`: Disable looping.
+- `/loop song`: Loop the current song.
+- `/loop queue` or `/loop all`: Loop the full queue.
+- `/volume <0-100>`: Set volume.
+- `/volup`: Increase volume by 10%.
+- `/voldown`: Decrease volume by 10%.
+- `/volumecheck`: Show current volume.
+- `/mute`: Mute the bot.
+- `/unmute`: Restore the previous volume.
 
 ### Status, Playlists, And AI
 
-- `!nowplaying` / `!np` / `!now`: Show the currently playing track.
-- `!progress`: Show playback progress.
-- `!lyrics` / `!ly`: Search lyrics for the current song.
-- `!saveplaylist <name>` / `!sl`: Save the current track and queue as a playlist.
-- `!playplaylist <name>` / `!ppl`: Load a saved playlist into the queue.
-- `!ask <question>` / `!gemini` / `!ai`: Ask Gemini a question and receive a text response.
-- `!help` / `!commands` / `!h` / `!指令` / `!教學`: Show the command list.
+- `/nowplaying`: Show the currently playing track.
+- `/progress`: Show playback progress.
+- `/lyrics`: Search lyrics for the current song.
+- `/saveplaylist <name>`: Save the current track and queue as a playlist.
+- `/playplaylist <name>`: Load a saved playlist into the queue.
+- `/ask <question>`: Ask Gemini a question and receive a text response.
+- `/help`: Show the command list.
 
 ## Directory Structure
 
@@ -173,7 +174,7 @@ py-discord-bot/
 To add a new command:
 
 1. Create a new file in `music/commands/`, for example `ping.py`.
-2. Define a mixin class with a `@commands.command(...)` method.
+2. Define a mixin class with an `@app_commands.command(...)` method.
 3. Export that mixin in `music/commands/__init__.py`.
 4. Add the mixin to the `Music` class inheritance list in `music/cog.py`.
 

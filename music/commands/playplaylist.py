@@ -2,20 +2,22 @@
 import json
 import os
 import re
-from typing import Optional
-from discord.ext import commands
+import discord
+from discord import app_commands
 
+from music.context import InteractionContext
 from music.player import get_player
 
 
 class PlayPlaylistCommandMixin:
     """提供播放清單載入指令的 Mixin 類別。"""
 
-    @commands.command(
-        name="playplaylist", aliases=["ppl"], help="載入並播放您儲存的個人播放清單"
+    @app_commands.command(
+        name="playplaylist", description="載入並播放您儲存的個人播放清單"
     )
+    @app_commands.describe(playlist_name="要載入的播放清單名稱")
     async def playplaylist_command(
-        self, ctx: commands.Context, *, playlist_name: Optional[str] = None
+        self, interaction: discord.Interaction, playlist_name: str
     ) -> None:
         """載入儲存的播放清單並將歌曲加入佇列。
 
@@ -30,9 +32,10 @@ class PlayPlaylistCommandMixin:
             配合新的儲存架構，此指令會讀取 `storage/playlists/` 目錄下以 `{user_id}_{playlist_name}.json`
             命名的獨立檔案。佇列中的網址會在播放器迴圈進行串流解析時即時處理。
         """
+        ctx = InteractionContext(interaction)
         if not playlist_name:
             return await ctx.send(
-                "請提供要載入並播放的播放清單名稱。\n用法: !playplaylist <名稱>"
+                "請提供要載入並播放的播放清單名稱。\n用法: /playplaylist <名稱>"
             )
 
         # 延遲初始化：確保 playlists 資料夾存在
@@ -64,11 +67,12 @@ class PlayPlaylistCommandMixin:
                 f"播放清單「**{playlist_name}**」中沒有歌曲或檔案損毀。"
             )
 
-        if not ctx.author.voice:
+        voice_state = getattr(ctx.author, "voice", None)
+        if not voice_state:
             return await ctx.send("你必須先加入一個語音頻道才能播放音樂。")
 
         if not ctx.voice_client:
-            await ctx.author.voice.channel.connect()
+            await voice_state.channel.connect()
 
         msg = await ctx.send(f"🔄 正在載入播放清單「**{playlist_name}**」...")
         player = get_player(ctx)

@@ -3,11 +3,12 @@ import asyncio
 import logging
 import os
 import threading
-from typing import Optional
 
 import discord
 import psutil
-from discord.ext import commands
+from discord import app_commands
+
+from music.context import InteractionContext
 
 # 取得與 main.py 設定相同的全域 Logger
 log = logging.getLogger("MusicBot")
@@ -16,16 +17,16 @@ log = logging.getLogger("MusicBot")
 class SysInfoCommandMixin:
     """提供系統資源監控與詳細程序清單的 Mixin 類別。"""
 
-    @commands.command(
+    @app_commands.command(
         name="sysinfo",
-        aliases=["stats", "狀態", "top"],
-        help="查看系統資源與詳細的執行緒/任務清單",
+        description="查看系統資源與詳細的執行緒/任務清單",
     )
-    async def sysinfo_command(self, ctx: commands.Context) -> None:
+    async def sysinfo_command(self, interaction: discord.Interaction) -> None:
         """收集並顯示目前機器的 CPU、記憶體，以及所有的執行緒和非同步任務清單。
 
         同時將清單詳細內容輸出至終端機與系統日誌檔中。
         """
+        ctx = InteractionContext(interaction)
         msg = await ctx.send("📊 正在深入掃描系統資源與背景程序...")
 
         # 取得目前 Python 程序的 PID 與硬體消耗

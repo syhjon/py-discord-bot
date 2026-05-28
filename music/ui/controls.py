@@ -8,7 +8,7 @@ from music.utils import create_progress_bar, format_time
 
 
 class PlayerControls(discord.ui.View):
-    """用於當前播放歌曲的互動式控制按鈕視圖。"""
+    """用於目前播放歌曲的互動式控制按鈕視圖。"""
 
     def __init__(self, player: Any) -> None:
         """初始化播放器控制介面。
@@ -66,7 +66,7 @@ class PlayerControls(discord.ui.View):
     async def skip(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        """跳過當前歌曲。
+        """跳過目前歌曲。
 
         Args:
             interaction (discord.Interaction): Discord 按鈕互動上下文。
@@ -103,7 +103,7 @@ class PlayerControls(discord.ui.View):
             None.
 
         Notes:
-            此動作僅影響佇列中的歌曲順序，不會中斷當前正在播放的歌曲。
+            此動作僅影響佇列中的歌曲順序，不會中斷目前正在播放的歌曲。
         """
         if len(self.player.queue) < 2:
             return await interaction.response.send_message(

@@ -1,6 +1,8 @@
 # music/commands/queue.py - 提供佇列列表查看功能的指令 Mixin
-from discord.ext import commands
+import discord
+from discord import app_commands
 
+from music.context import InteractionContext
 from music.player import get_player
 from music.utils import format_time
 
@@ -8,8 +10,8 @@ from music.utils import format_time
 class QueueCommandMixin:
     """提供佇列查看指令的 Mixin 類別。"""
 
-    @commands.command(name="queue", aliases=["list"], help="查看目前的播放佇列")
-    async def queue_list(self, ctx: commands.Context) -> None:
+    @app_commands.command(name="queue", description="查看目前的播放佇列")
+    async def queue_list(self, interaction: discord.Interaction) -> None:
         """發送目前播放佇列的格式化清單。
 
         Args:
@@ -21,6 +23,7 @@ class QueueCommandMixin:
         Notes:
             為了保持訊息簡潔並符合 Discord 訊息長度限制，系統預設僅顯示佇列中的前 10 首歌曲。
         """
+        ctx = InteractionContext(interaction)
         player = get_player(ctx)
 
         if len(player.queue) == 0:

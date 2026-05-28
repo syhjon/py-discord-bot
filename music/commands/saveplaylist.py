@@ -2,22 +2,24 @@
 import json
 import os
 import re
-from typing import Optional
-from discord.ext import commands
+import discord
+from discord import app_commands
 
+from music.context import InteractionContext
 from music.player import get_player
 
 
 class SavePlaylistCommandMixin:
     """提供儲存播放清單指令的 Mixin 類別。"""
 
-    @commands.command(
-        name="saveplaylist", aliases=["sl"], help="將目前的播放佇列儲存為個人播放清單"
+    @app_commands.command(
+        name="saveplaylist", description="將目前的播放佇列儲存為個人播放清單"
     )
+    @app_commands.describe(playlist_name="播放清單名稱")
     async def saveplaylist_command(
-        self, ctx: commands.Context, *, playlist_name: Optional[str] = None
+        self, interaction: discord.Interaction, playlist_name: str
     ) -> None:
-        """將目前的播放狀態（包含當前歌曲與佇列）儲存為單一獨立的播放清單檔案。
+        """將目前的播放狀態（包含目前歌曲與佇列）儲存為單一獨立的播放清單檔案。
 
         Args:
             ctx (commands.Context): Discord 指令呼叫上下文。
@@ -30,9 +32,10 @@ class SavePlaylistCommandMixin:
             檔案將會儲存在 `storage/playlists/` 目錄下，命名格式為 `{user_id}_{playlist_name}.json`，
             以此確保每位使用者的播放清單獨立且不會互相覆蓋。
         """
+        ctx = InteractionContext(interaction)
         if not playlist_name:
             return await ctx.send(
-                "請提供播放清單名稱。\n用法: !saveplaylist <播放清單名稱>"
+                "請提供播放清單名稱。\n用法: /saveplaylist <播放清單名稱>"
             )
 
         player = get_player(ctx)
@@ -53,7 +56,7 @@ class SavePlaylistCommandMixin:
             playlists_dir, f"{ctx.author.id}_{safe_playlist_name}.json"
         )
 
-        # 收集當前播放歌曲與佇列中的歌曲
+        # 收集目前播放歌曲與佇列中的歌曲
         save_list = []
         if player.current:
             save_list.append(

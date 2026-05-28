@@ -4,14 +4,14 @@ import gc
 from typing import Any
 
 import discord
-from discord.ext import commands
 
+from music.context import InteractionContext
 from music.services.youtube import fetch_song_data, extract_info
 from music.ui import SongSelect
 
 
 async def process_track_request(
-    ctx: commands.Context,
+    ctx: InteractionContext,
     query: str,
     ytdl_instance: Any,
     is_cutin: bool = False,
@@ -21,7 +21,7 @@ async def process_track_request(
     """統一處理歌曲搜尋與加入佇列的邏輯，具備嚴格的資源生命週期管理。
 
     Args:
-        ctx (commands.Context): Discord 指令上下文。
+        ctx (InteractionContext): Discord 斜線指令互動上下文。
         query (str): 使用者輸入的搜尋關鍵字或網址。
         ytdl_instance (Any): 用於解析的 yt-dlp 實例。
         is_cutin (bool): 是否為插播模式（強制移動到佇列最前方並立即播放）。
@@ -33,11 +33,12 @@ async def process_track_request(
     """
     from music.player import get_player
 
-    if not ctx.author.voice:
+    voice_state = getattr(ctx.author, "voice", None)
+    if not voice_state:
         return await ctx.send("❌ 您必須先加入一個語音頻道。")
 
     if not ctx.voice_client:
-        await ctx.author.voice.channel.connect()
+        await voice_state.channel.connect()
 
     msg = await ctx.send(f"🔍 正在搜尋並處理歌曲：`{query}` ...")
     player = get_player(ctx)
@@ -58,7 +59,7 @@ async def process_track_request(
             return await msg.edit(content="❌ 找不到相關歌曲！")
 
         # ========================
-        # UI 選單模式 (!song)
+        # UI 選單模式 (/song)
         # ========================
         if use_select_menu and len(raw_data) > 1:
             # 建立互動式選單
@@ -68,7 +69,7 @@ async def process_track_request(
             return
 
         # ========================
-        # 直接播放模式 (!quick / !cutin / 結果僅有1首)
+        # 直接播放模式 (/quick / /cutin / 結果僅有1首)
         # ========================
         song_info = extract_info(raw_data[0])
 

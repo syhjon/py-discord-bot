@@ -1,7 +1,8 @@
-# music/commands/nowplaying.py - 提供顯示當前播放歌曲與播放器狀態的指令 Mixin
+# music/commands/nowplaying.py - 提供顯示目前播放歌曲與播放器狀態的指令 Mixin
 import discord
-from discord.ext import commands
+from discord import app_commands
 
+from music.context import InteractionContext
 from music.player import get_player
 from music.utils import create_progress_bar, format_time
 
@@ -9,10 +10,10 @@ from music.utils import create_progress_bar, format_time
 class NowplayingCommandMixin:
     """提供「現在播放 (Now Playing)」功能指令的 Mixin 類別。"""
 
-    @commands.command(
-        name="nowplaying", aliases=["np", "now"], help="顯示目前播放的歌曲與播放器狀態"
+    @app_commands.command(
+        name="nowplaying", description="顯示目前播放的歌曲與播放器狀態"
     )
-    async def nowplaying_command(self, ctx: commands.Context) -> None:
+    async def nowplaying_command(self, interaction: discord.Interaction) -> None:
         """發送一個包含目前播放狀態資訊的 Embed 訊息。
 
         Args:
@@ -24,6 +25,7 @@ class NowplayingCommandMixin:
         Notes:
             此 Embed 訊息整合了歌曲進度、原始連結、暫停狀態、音量、循環模式以及佇列長度。
         """
+        ctx = InteractionContext(interaction)
         player = get_player(ctx)
 
         if not player.current:
@@ -68,6 +70,6 @@ class NowplayingCommandMixin:
             f"**待播歌曲：** 📜 {len(player.queue)} 首"
         )
 
-        embed.add_field(name="📊 播放器當前狀態", value=status_text, inline=False)
+        embed.add_field(name="📊 播放器目前狀態", value=status_text, inline=False)
 
         await ctx.send(embed=embed)

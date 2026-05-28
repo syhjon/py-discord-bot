@@ -4,6 +4,7 @@ import time
 
 import discord
 
+from music.context import InteractionContext
 from music.services import create_player_ytdl
 from music.ui import PlayerControls
 from music.utils import format_time
@@ -12,11 +13,11 @@ from music.utils import format_time
 class MusicPlayer:
     """管理單一語音頻道（Guild）的音樂播放狀態。"""
 
-    def __init__(self, ctx: discord.ext.commands.Context) -> None:
+    def __init__(self, ctx: InteractionContext) -> None:
         """初始化該伺服器的播放器狀態。
 
         Args:
-            ctx (discord.ext.commands.Context): 用於識別機器人、伺服器與文字頻道的上下文。
+            ctx (InteractionContext): 用於識別機器人、伺服器與文字頻道的上下文。
 
         Returns:
             None.
@@ -39,7 +40,7 @@ class MusicPlayer:
         self.pause_timestamp = 0
         self.accumulated_pause = 0
         self.seek_offset = 0  # 用於傳遞給下一輪的跳轉指令
-        self.current_song_start_offset = 0  # 記錄當前播放歌曲的起始偏移量，供進度條計算
+        self.current_song_start_offset = 0  # 記錄目前播放歌曲的起始偏移量，供進度條計算
 
         self.ytdl = create_player_ytdl()
 
@@ -129,7 +130,7 @@ class MusicPlayer:
     async def add_to_queue(
         self,
         song_info: dict,
-        ctx: discord.ext.commands.Context,
+        ctx: InteractionContext,
         insert_at_front: bool = False,
         announce: bool = True,
     ) -> None:
@@ -137,7 +138,7 @@ class MusicPlayer:
 
         Args:
             song_info (dict): 包含標題、URL 及其他 metadata 的佇列項目。
-            ctx (discord.ext.commands.Context): 用於發送通知訊息的內容上下文。
+            ctx (InteractionContext): 用於發送通知訊息的內容上下文。
             insert_at_front (bool): 是否插入至佇列最前端。
             announce (bool): 是否發送 Discord 加入佇列的通知訊息。
 
@@ -299,11 +300,11 @@ class MusicPlayer:
 players = {}
 
 
-def get_player(ctx: discord.ext.commands.Context) -> MusicPlayer:
+def get_player(ctx: InteractionContext) -> MusicPlayer:
     """取得該伺服器的專屬播放器實例。
 
     Args:
-        ctx (discord.ext.commands.Context): 用於識別伺服器的內容上下文。
+        ctx (InteractionContext): 用於識別伺服器的內容上下文。
 
     Returns:
         MusicPlayer: 該伺服器活躍的播放器實例。

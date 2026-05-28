@@ -1,17 +1,17 @@
 # music/commands/shuffle.py - 提供隨機打亂佇列功能的指令 Mixin
 import random
-from discord.ext import commands
+import discord
+from discord import app_commands
 
+from music.context import InteractionContext
 from music.player import get_player
 
 
 class ShuffleCommandMixin:
     """提供佇列隨機排序指令的 Mixin 類別。"""
 
-    @commands.command(
-        name="shuffle", aliases=["random", "mix"], help="隨機打亂播放佇列"
-    )
-    async def shuffle_command(self, ctx: commands.Context) -> None:
+    @app_commands.command(name="shuffle", description="隨機打亂播放佇列")
+    async def shuffle_command(self, interaction: discord.Interaction) -> None:
         """將佇列中的歌曲順序進行隨機打亂。
 
         Args:
@@ -23,6 +23,7 @@ class ShuffleCommandMixin:
         Notes:
             若佇列中歌曲數量少於 2 首，隨機打亂則無實質意義，系統將會忽略該請求。
         """
+        ctx = InteractionContext(interaction)
         player = get_player(ctx)
 
         if len(player.queue) < 2:

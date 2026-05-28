@@ -24,7 +24,7 @@ class HelpPagination(discord.ui.View):
         self.update_buttons()
 
     def update_buttons(self) -> None:
-        """根據當前頁碼更新分頁按鈕的啟用狀態。
+        """根據目前頁碼更新分頁按鈕的啟用狀態。
 
         Returns:
             None.

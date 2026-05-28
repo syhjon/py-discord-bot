@@ -2,6 +2,7 @@
 from typing import Any, Dict, List
 import discord
 
+from music.context import InteractionContext
 from music.utils import format_time
 
 
@@ -12,14 +13,14 @@ class SongSelect(discord.ui.Select):
         self,
         top10_results: List[Dict[str, Any]],
         player: Any,
-        ctx: discord.ext.commands.Context,
+        ctx: InteractionContext,
     ) -> None:
         """初始化歌曲選擇選單。
 
         Args:
             top10_results (List[Dict[str, Any]]): 原始的 yt-dlp 搜尋結果字典列表。
             player (Any): 即將接收所選歌曲的 `MusicPlayer` 實例。
-            ctx (discord.ext.commands.Context): 創建選單的指令上下文。
+            ctx (InteractionContext): 創建選單的斜線指令互動上下文。
 
         Returns:
             None.
@@ -29,7 +30,7 @@ class SongSelect(discord.ui.Select):
         """
         self.top10: List[Dict[str, Any]] = top10_results
         self.player: Any = player
-        self.ctx: discord.ext.commands.Context = ctx
+        self.ctx: InteractionContext = ctx
 
         options = []
         for i, video in enumerate(self.top10):
@@ -94,4 +95,7 @@ class SongSelect(discord.ui.Select):
         await interaction.response.edit_message(
             content=f"✅ 已選擇歌曲：**{song_info['title']}**", view=None
         )
-        await self.player.add_to_queue(song_info, self.ctx)
+        await self.player.add_to_queue(song_info, self.ctx, announce=False)
+        await self.ctx.send_public(
+            f"✅ {interaction.user.mention} 點播了 **{song_info['title']}**"
+        )

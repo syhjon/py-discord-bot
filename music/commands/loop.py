@@ -1,20 +1,29 @@
 # music/commands/loop.py - 提供播放循環模式設定的指令 Mixin
-from typing import Optional
-from discord.ext import commands
+import discord
+from discord import app_commands
 
+from music.context import InteractionContext
 from music.player import get_player
 
 
 class LoopCommandMixin:
     """提供循環模式設定指令的 Mixin 類別。"""
 
-    @commands.command(
+    @app_commands.command(
         name="loop",
-        aliases=["repeat", "replay"],
-        help="重播模式。off：關閉循環；song：單曲循環；queue/all：佇列循環",
+        description="設定重播模式",
+    )
+    @app_commands.describe(mode="off 關閉；song 單曲循環；queue 佇列循環")
+    @app_commands.choices(
+        mode=[
+            app_commands.Choice(name="關閉循環", value="off"),
+            app_commands.Choice(name="單曲循環", value="song"),
+            app_commands.Choice(name="佇列循環", value="queue"),
+            app_commands.Choice(name="佇列循環 (all)", value="all"),
+        ]
     )
     async def loop_command(
-        self, ctx: commands.Context, mode: Optional[str] = None
+        self, interaction: discord.Interaction, mode: str
     ) -> None:
         """設定播放器的循環模式。
 
@@ -28,6 +37,7 @@ class LoopCommandMixin:
         Notes:
             循環模式狀態會直接儲存在該伺服器的 `MusicPlayer` 實例中，影響後續的播放流程。
         """
+        ctx = InteractionContext(interaction)
         player = get_player(ctx)
         mode = mode.lower() if mode else ""
 
