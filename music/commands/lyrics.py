@@ -240,7 +240,7 @@ class LyricsCommandMixin:
 
         try:
             while player.current:
-                # 1. 檢查是否被切歌或插播 (URL 改變)，若是則立刻結束任務
+                # 檢查是否被切歌或插播 (URL 改變)，若是則立刻結束任務
                 current_url = player.current.get(
                     "webpage_url", player.current.get("url", "")
                 )
@@ -249,11 +249,11 @@ class LyricsCommandMixin:
 
                 vc = ctx.voice_client
 
-                # 2. 檢查是否從語音頻道斷線
+                # 檢查是否從語音頻道斷線
                 if not vc or not vc.is_connected():
                     break
 
-                # 3. 檢查播放狀態 (防範殭屍程序)
+                # 檢查播放狀態 (防範殭屍程序)
                 if not vc.is_playing():
                     if vc.is_paused():
                         # 若處於暫停狀態，進入極低耗能休眠，不執行歌詞進度計算
@@ -285,23 +285,37 @@ class LyricsCommandMixin:
                             if parsed_lyrics:
                                 desc += f"即將演唱：*{parsed_lyrics[0][1]}*"
                         else:
-                            prev_line = (
-                                parsed_lyrics[target_index - 1][1]
-                                if target_index > 0
-                                else ""
-                            )
-                            curr_line = parsed_lyrics[target_index][1]
-                            next_line = (
-                                parsed_lyrics[target_index + 1][1]
-                                if target_index < len(parsed_lyrics) - 1
-                                else ""
+                            # 使用 List 收集要顯示的行數，支援上下各兩句 (共五行)
+                            lines_to_show = []
+
+                            # 上上句
+                            if target_index >= 2:
+                                lines_to_show.append(
+                                    f"*{parsed_lyrics[target_index - 2][1]}*"
+                                )
+                            # 上一句
+                            if target_index >= 1:
+                                lines_to_show.append(
+                                    f"*{parsed_lyrics[target_index - 1][1]}*"
+                                )
+
+                            # 當前句 (加粗與指示號)
+                            lines_to_show.append(
+                                f"**▶ {parsed_lyrics[target_index][1]}**"
                             )
 
-                            if prev_line:
-                                desc += f"*{prev_line}*\n"
-                            desc += f"**▶ {curr_line}**\n"
-                            if next_line:
-                                desc += f"*{next_line}*"
+                            # 下一句
+                            if target_index + 1 < len(parsed_lyrics):
+                                lines_to_show.append(
+                                    f"*{parsed_lyrics[target_index + 1][1]}*"
+                                )
+                            # 下下句
+                            if target_index + 2 < len(parsed_lyrics):
+                                lines_to_show.append(
+                                    f"*{parsed_lyrics[target_index + 2][1]}*"
+                                )
+
+                            desc += "\n".join(lines_to_show)
 
                         embed.description = desc
 
