@@ -21,6 +21,43 @@ from core.config import BotConfig
 from core.container import ServiceContainer
 
 
+def ensure_opus_loaded(logger: Logger) -> None:
+    """確保 Discord 語音播放 PCM 音源時所需的 Opus 編碼器已載入。"""
+    if discord.opus.is_loaded():
+        return
+
+    candidates = [
+        os.getenv("OPUS_LIBRARY_PATH"),
+        "libopus.0.dylib",
+        "libopus.dylib",
+        "libopus.so.0",
+        "libopus.so",
+        "/opt/homebrew/lib/libopus.dylib",
+        "/usr/local/lib/libopus.dylib",
+        "/usr/lib/libopus.so.0",
+    ]
+
+    last_error: Exception | None = None
+    for candidate in candidates:
+        if not candidate:
+            continue
+
+        try:
+            discord.opus.load_opus(candidate)
+        except OSError as e:
+            last_error = e
+            continue
+
+        logger.info(f"✅ 已載入 Opus 音訊編碼器: {candidate}")
+        return
+
+    logger.warning(
+        "無法自動載入 Opus 音訊編碼器；語音可連線但可能無法播放 PCM 音訊。"
+        "請安裝 opus，或設定 OPUS_LIBRARY_PATH 指向 libopus。"
+        f"最後錯誤: {last_error}"
+    )
+
+
 class CustomBot(commands.Bot):
     """
     自訂的 Discord Bot 類別。
@@ -56,6 +93,7 @@ class CustomBot(commands.Bot):
 
         # 綁定全域的應用程式指令 (斜線指令) 錯誤處理器
         self.tree.error(self.on_app_command_error)
+        ensure_opus_loaded(self.log)
 
     async def clear_remote_global_commands(self) -> None:
         """

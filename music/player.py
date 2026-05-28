@@ -1,5 +1,6 @@
 # music/player.py - 管理播放佇列、語音播放、循環模式與跳轉邏輯
 import asyncio
+import logging
 import time
 
 import discord
@@ -8,6 +9,8 @@ from core.context import InteractionContext
 from music.services import create_player_ytdl
 from music.ui import PlayerControls
 from music.utils import format_time
+
+log = logging.getLogger("MusicBot")
 
 
 class MusicPlayer:
@@ -46,6 +49,19 @@ class MusicPlayer:
 
         # 將背景任務存為實例變數，方便後續安全取消
         self.player_task = self.bot.loop.create_task(self.player_loop())
+        self.player_task.add_done_callback(self._log_player_task_error)
+
+    def _log_player_task_error(self, task: asyncio.Task) -> None:
+        """記錄背景播放任務中未被處理的例外。"""
+        if task.cancelled():
+            return
+
+        error = task.exception()
+        if error:
+            log.error(
+                "音樂播放背景任務異常終止。",
+                exc_info=(type(error), error, error.__traceback__),
+            )
 
     async def cleanup(self) -> None:
         """清理播放器資源，優雅關閉 FFmpeg 與背景任務。"""
@@ -152,6 +168,10 @@ class MusicPlayer:
             self.queue.insert(0, song_info)
         else:
             self.queue.append(song_info)
+            log.info(
+                f"已加入播放佇列: {song_info.get('title', '未知曲目')} "
+                f"(queue={len(self.queue)})"
+            )
             if announce and (len(self.queue) > 1 or ctx.voice_client.is_playing()):
                 await ctx.send(
                     f"✅ 已將 **{song_info['title']}** 加入播放佇列！ (目前排在第 {len(self.queue)} 首)"
@@ -209,10 +229,15 @@ class MusicPlayer:
                             self.current["thumbnail"] = data["thumbnails"][0]["url"]
 
                     except Exception as e:
-                        print(f"即時解析歌曲失敗: {e}")
+                        log.exception(f"即時解析歌曲失敗: {e}")
                         self.current = None
                         self.bot.loop.call_soon_threadsafe(self.next.set)
                         continue
+
+                if not self.guild.voice_client:
+                    log.warning("播放前語音連線已不存在，略過目前歌曲。")
+                    self.current = None
+                    continue
 
                 # 組裝 FFmpeg 選項 (必須將 -ss 放在 -reconnect 前面以提升跳轉速度)
                 before_opts = ""
@@ -224,12 +249,21 @@ class MusicPlayer:
                 )
                 ffmpeg_options = {"options": "-vn", "before_options": before_opts}
 
-                audio_source = discord.FFmpegPCMAudio(
-                    self.current["url"], **ffmpeg_options
-                )
-                volume_source = discord.PCMVolumeTransformer(
-                    audio_source, volume=self.volume
-                )
+                try:
+                    audio_source = discord.FFmpegPCMAudio(
+                        self.current["url"], **ffmpeg_options
+                    )
+                    volume_source = discord.PCMVolumeTransformer(
+                        audio_source, volume=self.volume
+                    )
+                except Exception as e:
+                    log.exception(f"建立 FFmpeg 音源失敗: {e}")
+                    if self.channel:
+                        await self.channel.send(
+                            f"⚠️ 建立音訊來源失敗，已略過：**{self.current.get('title', '未知曲目')}**"
+                        )
+                    self.current = None
+                    continue
 
                 self.start_timestamp = time.time()
                 self.accumulated_pause = 0
@@ -254,7 +288,10 @@ class MusicPlayer:
                     """
                     finished_song = self.current
                     if error:
-                        print(f"播放錯誤: {error}")
+                        log.error(
+                            "播放期間發生錯誤。",
+                            exc_info=(type(error), error, error.__traceback__),
+                        )
 
                     if self.loop_mode == 0:  # 關閉循環
                         if finished_song:
@@ -289,7 +326,18 @@ class MusicPlayer:
                         embed.set_thumbnail(url=self.current["thumbnail"])
                     await self.channel.send(embed=embed, view=PlayerControls(self))
 
-                self.guild.voice_client.play(volume_source, after=after_play)
+                try:
+                    self.guild.voice_client.play(volume_source, after=after_play)
+                except Exception as e:
+                    log.exception(f"啟動語音播放失敗: {e}")
+                    if self.channel:
+                        await self.channel.send(
+                            f"⚠️ 啟動播放失敗，已略過：**{self.current.get('title', '未知曲目')}**"
+                        )
+                    self.current = None
+                    continue
+
+                log.info(f"開始播放: {self.current.get('title', '未知曲目')}")
                 await self.next.wait()
 
         except asyncio.CancelledError:
