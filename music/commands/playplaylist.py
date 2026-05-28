@@ -27,7 +27,7 @@ class PlayPlaylistCommandMixin:
             None.
 
         Notes:
-            配合新的儲存架構，此指令會讀取 `playlists/` 目錄下以 `{user_id}_{playlist_name}.json`
+            配合新的儲存架構，此指令會讀取 `storage/playlists/` 目錄下以 `{user_id}_{playlist_name}.json`
             命名的獨立檔案。佇列中的網址會在播放器迴圈進行串流解析時即時處理。
         """
         if not playlist_name:
@@ -36,7 +36,7 @@ class PlayPlaylistCommandMixin:
             )
 
         # 延遲初始化：確保 playlists 資料夾存在
-        playlists_dir = os.path.join(os.getcwd(), "playlists")
+        playlists_dir = os.path.join(os.getcwd(), "storage", "playlists")
         os.makedirs(playlists_dir, exist_ok=True)
 
         # 名稱清理，確保能正確對應到儲存時的檔案名稱

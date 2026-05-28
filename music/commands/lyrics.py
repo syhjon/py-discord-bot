@@ -33,7 +33,7 @@ class LyricsCommandMixin:
             return await ctx.send("目前沒有任何歌曲正在播放。")
 
         # 延遲初始化：確保本地端存放歌詞的目錄存在
-        lyrics_dir = os.path.join(os.getcwd(), "lyrics")
+        lyrics_dir = os.path.join(os.getcwd(), "storage", "lyrics")
         os.makedirs(lyrics_dir, exist_ok=True)
 
         # 1. 取得當前網址，並萃取 YouTube 影片 ID 作為檔名

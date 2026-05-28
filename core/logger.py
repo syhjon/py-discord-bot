@@ -23,11 +23,11 @@ def setup_logging(logger_name: str = "MusicBot") -> logging.Logger:
 
     Notes:
         根日誌記錄器 (Root Logger) 僅會在系統啟動時設定一次。
-        日誌會同時輸出至終端機與 `logs/bot.log`，並啟用自動輪轉功能。
+        日誌會同時輸出至終端機與 `storage/logs/bot.log`，並啟用自動輪轉功能。
     """
     # 確保日誌存放的資料夾存在
-    if not os.path.exists("logs"):
-        os.makedirs("logs")
+    logs_dir = os.path.join(os.getcwd(), "storage", "logs")
+    os.makedirs(logs_dir, exist_ok=True)
 
     # 設定日誌輸出的格式
     log_format = logging.Formatter(
@@ -46,7 +46,7 @@ def setup_logging(logger_name: str = "MusicBot") -> logging.Logger:
 
     # 處理器 2：輸出到檔案 (File)，並帶有輪轉機制
     file_handler = RotatingFileHandler(
-        filename="logs/bot.log",
+        filename=os.path.join(logs_dir, "bot.log"),
         encoding="utf-8",
         maxBytes=5 * 1024 * 1024,  # 最大 5 MB
         backupCount=5,  # 最多保留 5 個舊檔案

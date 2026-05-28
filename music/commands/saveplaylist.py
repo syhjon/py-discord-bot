@@ -27,7 +27,7 @@ class SavePlaylistCommandMixin:
             None.
 
         Notes:
-            檔案將會儲存在 `playlists/` 目錄下，命名格式為 `{user_id}_{playlist_name}.json`，
+            檔案將會儲存在 `storage/playlists/` 目錄下，命名格式為 `{user_id}_{playlist_name}.json`，
             以此確保每位使用者的播放清單獨立且不會互相覆蓋。
         """
         if not playlist_name:
@@ -40,7 +40,7 @@ class SavePlaylistCommandMixin:
             return await ctx.send("目前播放佇列中沒有歌曲，無法儲存。")
 
         # 延遲初始化：確保 playlists 資料夾存在，避免 AttributeError
-        playlists_dir = os.path.join(os.getcwd(), "playlists")
+        playlists_dir = os.path.join(os.getcwd(), "storage", "playlists")
         os.makedirs(playlists_dir, exist_ok=True)
 
         # 檔案名稱清理：過濾掉作業系統不允許的非法路徑字元，防止路徑穿越 (Path Traversal) 或寫入錯誤
