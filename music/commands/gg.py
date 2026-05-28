@@ -2,8 +2,8 @@
 import discord
 from discord import app_commands
 
-from music.context import InteractionContext
-from music.player import get_player
+from core.context import InteractionContext
+from music.services.queue_actions import debug_queue
 
 
 class GgCommandMixin:
@@ -22,7 +22,4 @@ class GgCommandMixin:
         Notes:
             此指令主要用於開發期間的診斷與狀態檢查。
         """
-        ctx = InteractionContext(interaction)
-        player = get_player(ctx)
-        print(f"目前佇列: {player.queue}")
-        await ctx.send("已在終端機印出目前 Queue 的狀態。")
+        await debug_queue(InteractionContext(interaction))

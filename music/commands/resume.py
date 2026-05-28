@@ -2,8 +2,8 @@
 import discord
 from discord import app_commands
 
-from music.context import InteractionContext
-from music.player import get_player
+from core.context import InteractionContext
+from music.services.playback_controls import resume_playback
 
 
 class ResumeCommandMixin:
@@ -22,8 +22,4 @@ class ResumeCommandMixin:
         Notes:
             此指令會更新播放器的時間狀態，確保後續的進度顯示與實際播放時間保持準確。
         """
-        ctx = InteractionContext(interaction)
-        if ctx.voice_client and ctx.voice_client.is_paused():
-            ctx.voice_client.resume()
-            get_player(ctx).resume_time()
-            await ctx.send("▶️ 已繼續播放。")
+        await resume_playback(InteractionContext(interaction))

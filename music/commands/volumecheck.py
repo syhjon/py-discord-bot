@@ -2,8 +2,8 @@
 import discord
 from discord import app_commands
 
-from music.context import InteractionContext
-from music.player import get_player
+from core.context import InteractionContext
+from music.services.volume import check_volume
 
 
 class VolumecheckCommandMixin:
@@ -22,6 +22,4 @@ class VolumecheckCommandMixin:
         Notes:
             音量數值係直接從該伺服器的 `MusicPlayer` 實例狀態中獲取。
         """
-        ctx = InteractionContext(interaction)
-        player = get_player(ctx)
-        await ctx.send(f"🔊 目前音量為：{int(player.volume * 100)}%")
+        await check_volume(InteractionContext(interaction))

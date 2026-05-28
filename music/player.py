@@ -4,7 +4,7 @@ import time
 
 import discord
 
-from music.context import InteractionContext
+from core.context import InteractionContext
 from music.services import create_player_ytdl
 from music.ui import PlayerControls
 from music.utils import format_time

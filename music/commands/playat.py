@@ -2,7 +2,8 @@
 import discord
 from discord import app_commands
 
-from music.context import InteractionContext
+from core.context import InteractionContext
+from music.services.queue_actions import jump_to_index
 
 
 class PlayatCommandMixin:
@@ -26,5 +27,4 @@ class PlayatCommandMixin:
             此指令將執行邏輯委派給 `jump_command`，確保 `/jump` 與 `/playat`
             在伺服器上的行為邏輯完全一致。
         """
-        ctx = InteractionContext(interaction)
-        await self._jump_to_index(ctx, index)
+        await jump_to_index(InteractionContext(interaction), index)

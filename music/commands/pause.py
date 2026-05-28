@@ -2,8 +2,8 @@
 import discord
 from discord import app_commands
 
-from music.context import InteractionContext
-from music.player import get_player
+from core.context import InteractionContext
+from music.services.playback_controls import pause_playback
 
 
 class PauseCommandMixin:
@@ -22,8 +22,4 @@ class PauseCommandMixin:
         Notes:
             此指令會記錄暫停時間點，確保播放進度條的顯示狀態在暫停期間保持準確。
         """
-        ctx = InteractionContext(interaction)
-        if ctx.voice_client and ctx.voice_client.is_playing():
-            ctx.voice_client.pause()
-            get_player(ctx).pause_time()
-            await ctx.send("⏸️ 已暫停播放。")
+        await pause_playback(InteractionContext(interaction))

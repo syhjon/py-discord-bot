@@ -5,7 +5,8 @@ from typing import Any
 
 import discord
 
-from music.context import InteractionContext
+from core.context import InteractionContext
+from domain import IMusicSearchService
 from music.services.youtube import fetch_song_data, extract_info
 from music.ui import SongSelect
 
@@ -13,7 +14,7 @@ from music.ui import SongSelect
 async def process_track_request(
     ctx: InteractionContext,
     query: str,
-    ytdl_instance: Any,
+    search_service: IMusicSearchService | Any,
     is_cutin: bool = False,
     fetch_count: int = 1,
     use_select_menu: bool = False,
@@ -23,7 +24,7 @@ async def process_track_request(
     Args:
         ctx (InteractionContext): Discord 斜線指令互動上下文。
         query (str): 使用者輸入的搜尋關鍵字或網址。
-        ytdl_instance (Any): 用於解析的 yt-dlp 實例。
+        search_service (IMusicSearchService | Any): 音樂搜尋服務；也相容舊版 yt-dlp 實例。
         is_cutin (bool): 是否為插播模式（強制移動到佇列最前方並立即播放）。
         fetch_count (int): 要向 yt-dlp 請求的結果數量。
         use_select_menu (bool): 是否使用 UI 下拉選單供使用者選擇 (True 代表為 song 指令)。
@@ -32,6 +33,9 @@ async def process_track_request(
         None.
     """
     from music.player import get_player
+
+    if not query:
+        return await ctx.send("❌ 請提供歌曲名稱或 YouTube 網址。")
 
     voice_state = getattr(ctx.author, "voice", None)
     if not voice_state:
@@ -48,9 +52,15 @@ async def process_track_request(
 
     try:
         loop = asyncio.get_running_loop()
-        fetch_task = loop.create_task(
-            fetch_song_data(ytdl_instance, query, fetch_count)
-        )
+        uses_search_service = hasattr(search_service, "fetch_song_data")
+        if uses_search_service:
+            fetch_task = loop.create_task(
+                search_service.fetch_song_data(query, fetch_count)
+            )
+        else:
+            fetch_task = loop.create_task(
+                fetch_song_data(search_service, query, fetch_count)
+            )
 
         # 這裡將逾時稍微放寬到 20 秒，因為如果 fetch_count=10 會抓得比較久
         raw_data = await asyncio.wait_for(fetch_task, timeout=20.0)
@@ -91,7 +101,10 @@ async def process_track_request(
         # ========================
         # 直接播放模式 (/quick / /cutin / 結果僅有1首)
         # ========================
-        song_info = extract_info(raw_data[0])
+        if uses_search_service:
+            song_info = search_service.extract_info(raw_data[0])
+        else:
+            song_info = extract_info(raw_data[0])
 
         if is_cutin:
             if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():

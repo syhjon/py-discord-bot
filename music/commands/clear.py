@@ -2,8 +2,8 @@
 import discord
 from discord import app_commands
 
-from music.context import InteractionContext
-from music.player import get_player
+from core.context import InteractionContext
+from music.services.queue_actions import clear_queue
 
 
 class ClearCommandMixin:
@@ -22,7 +22,4 @@ class ClearCommandMixin:
         Notes:
             此指令不會停止目前正在播放的歌曲，僅清空佇列中剩餘的項目。
         """
-        ctx = InteractionContext(interaction)
-        player = get_player(ctx)
-        player.queue.clear()
-        await ctx.send("🗑️ 播放佇列已清空。")
+        await clear_queue(InteractionContext(interaction))

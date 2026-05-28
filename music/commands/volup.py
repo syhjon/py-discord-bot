@@ -2,8 +2,8 @@
 import discord
 from discord import app_commands
 
-from music.context import InteractionContext
-from music.player import get_player
+from core.context import InteractionContext
+from music.services.volume import increase_volume
 
 
 class VolupCommandMixin:
@@ -22,14 +22,4 @@ class VolupCommandMixin:
         Notes:
             音量調整具有上限限制，調整後的數值最大為 100%。
         """
-        ctx = InteractionContext(interaction)
-        player = get_player(ctx)
-        # 增加音量並確保不超過 100% (1.0)
-        new_vol = min(player.volume + 0.1, 1.0)
-        player.volume = new_vol
-
-        # 若目前有語音連線，同步調整來源音量
-        if ctx.voice_client and ctx.voice_client.source:
-            ctx.voice_client.source.volume = player.volume
-
-        await ctx.send(f"🔊 音量已增加至 {int(new_vol * 100)}%。")
+        await increase_volume(InteractionContext(interaction))

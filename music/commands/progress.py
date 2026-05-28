@@ -1,10 +1,8 @@
-# music/commands/progress.py - 提供顯示播放進度條功能的指令 Mixin
 import discord
 from discord import app_commands
 
-from music.context import InteractionContext
-from music.player import get_player
-from music.utils import create_progress_bar, format_time
+from core.context import InteractionContext
+from music.services.status import show_progress
 
 
 class ProgressCommandMixin:
@@ -23,21 +21,4 @@ class ProgressCommandMixin:
         Notes:
             此指令為 `/nowplaying` 指令的精簡版本，專注於顯示目前歌曲的播放時長與視覺化進度條。
         """
-        ctx = InteractionContext(interaction)
-        player = get_player(ctx)
-
-        if not player.current:
-            return await ctx.send("目前沒有任何歌曲正在播放。")
-
-        current_time = player.get_current_time()
-        duration = player.current.get("duration", 0)
-        progress_bar = create_progress_bar(current_time, duration)
-
-        embed = discord.Embed(
-            title=f"🎶 {player.current['title']}", color=discord.Color.blue()
-        )
-        embed.description = (
-            f"`{format_time(current_time)}` {progress_bar} `{format_time(duration)}`"
-        )
-
-        await ctx.send(embed=embed)
+        await show_progress(InteractionContext(interaction))

@@ -1,203 +1,63 @@
-# main.py - 主要的機器人啟動程式
+# main.py - Discord 機器人應用程式入口點
 """
-此模組為 Discord 機器人的主程式進入點。
-負責載入環境變數、初始化核心服務 (如日誌)、定義事件攔截器，並啟動機器人。
+Discord 機器人應用程式入口點 (Entry Point)。
+
+負責初始化設定檔、日誌系統、建立 Bot 實例，並註冊所需的各項外部服務
+（例如 Gemini AI 服務與 YouTube 搜尋服務），最後啟動非同步的 Discord 連線。
 """
+
 import asyncio
-import os
-from typing import Any
 
-import discord
-from discord import app_commands
-from discord.ext import commands
-from dotenv import load_dotenv
-
-# 引入抽離出去的核心日誌服務
+from core.bot import create_bot
+from core.config import load_config
 from core.logger import setup_logging
+from services import GeminiService, YouTubeSearchService
 
-# 啟動全域日誌系統
+# 載入環境設定檔
+config = load_config()
+
+# 設定日誌系統，定義記錄器名稱為 "MusicBot"
 log = setup_logging("MusicBot")
 
-# 載入環境變數與 Discord 設定
-load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
-GUILD_ID = os.getenv("DISCORD_GUILD_ID")
-
-intents = discord.Intents.default()
-intents.message_content = False
-
-
-# ==========================================
-# 建立自訂 Bot 類別，攔截所有事件
-# ==========================================
-class CustomBot(commands.Bot):
-    """自訂的 Discord Bot 類別，用於全域事件攔截與日誌記錄。"""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.guild_commands_synced = False
-
-    async def clear_remote_global_commands(self) -> None:
-        """清除 Discord 端殘留的全域斜線指令，避免與 guild 指令重複顯示。"""
-        commands_snapshot = list(self.tree.get_commands())
-        if not commands_snapshot:
-            return
-
-        self.tree.clear_commands(guild=None)
-        cleared = await self.tree.sync()
-
-        for command in commands_snapshot:
-            self.tree.add_command(command, override=True)
-
-        log.info(
-            f"✅ 已清除 {len(cleared)} 個全域斜線指令；目前改用伺服器即時同步。"
-        )
-
-    async def setup_hook(self) -> None:
-        """載入 Cog 並同步 Discord 斜線指令。"""
-        await load_extensions()
-
-        if GUILD_ID:
-            try:
-                guild = discord.Object(id=int(GUILD_ID))
-            except ValueError:
-                log.error("DISCORD_GUILD_ID 必須是 Discord 伺服器 ID 的數字。")
-            else:
-                await self.clear_remote_global_commands()
-                self.tree.copy_global_to(guild=guild)
-                synced = await self.tree.sync(guild=guild)
-                log.info(f"✅ 已同步 {len(synced)} 個伺服器斜線指令。")
-                return
-
-        log.info(
-            "未設定 DISCORD_GUILD_ID，將在 on_ready 對已加入的伺服器同步斜線指令。"
-        )
-
-    def dispatch(self, event_name: str, /, *args: Any, **kwargs: Any) -> None:
-        """分派 Discord 事件並記錄高層級的活動日誌。
-
-        Args:
-            event_name (str): Discord 事件名稱（不包含 `on_` 前綴）。
-            *args (Any): 由 discord.py 轉發的事件內容（位置引數）。
-            **kwargs (Any): 由 discord.py 轉發的事件內容（關鍵字引數）。
-
-        Returns:
-            None.
-
-        Notes:
-            為了保持日誌的可讀性，底層高頻率的 websocket 通訊事件將被忽略。
-        """
-        ignore_events = ["socket_raw_receive", "socket_raw_send", "socket_response"]
-
-        if event_name not in ignore_events:
-            log.info(f"[事件攔截]觸發事件: on_{event_name}")
-
-        super().dispatch(event_name, *args, **kwargs)
-
-
-# 初始化機器人實例
-bot = CustomBot(
-    command_prefix=commands.when_mentioned, intents=intents, help_command=None
+# 建立 Discord Bot 實例
+bot = create_bot(
+    config=config,
+    logger=log,
 )
-
-
-@bot.event
-async def on_ready() -> None:
-    """當 Discord 標記機器人為就緒狀態後，記錄啟動訊息並發送上線通知。
-
-    Args:
-        無。
-
-    Returns:
-        None.
-
-    Notes:
-        此事件會自動尋找機器人所在的每一個伺服器，並嘗試在系統頻道
-        或第一個可發言的文字頻道發送重啟完畢的通知。
-    """
-    log.info("====================================")
-    log.info(f"登入成功！機器人 {bot.user} 已經上線。")
-    log.info("全域事件監聽器已啟動。")
-    log.info("====================================")
-
-    if not GUILD_ID and not bot.guild_commands_synced:
-        await bot.clear_remote_global_commands()
-
-        for guild in bot.guilds:
-            guild_object = discord.Object(id=guild.id)
-            bot.tree.copy_global_to(guild=guild_object)
-            synced = await bot.tree.sync(guild=guild_object)
-            log.info(f"✅ 已在伺服器 [{guild.name}] 同步 {len(synced)} 個斜線指令。")
-        bot.guild_commands_synced = True
-
-    # 遍歷機器人加入的所有伺服器 (Guild)
-    for guild in bot.guilds:
-        # 優先尋找伺服器設定的「系統訊息頻道」
-        target_channel = guild.system_channel
-
-        # 若無系統頻道，或機器人沒有權限在該頻道發言，則尋找第一個可發言的文字頻道
-        if (
-            not target_channel
-            or not target_channel.permissions_for(guild.me).send_messages
-        ):
-            for channel in guild.text_channels:
-                if channel.permissions_for(guild.me).send_messages:
-                    target_channel = channel
-                    break
-
-        # 發送上線提示訊息
-        if target_channel:
-            try:
-                embed = discord.Embed(
-                    title="🟢 系統重啟完畢",
-                    description="各位好，音樂機器人已重新上線為您服務！\n請隨時輸入 `/help` 查看音樂指令。",
-                    color=discord.Color.green(),
-                )
-                await target_channel.send(embed=embed)
-                log.info(
-                    f"已在伺服器 [{guild.name}] 的頻道 [{target_channel.name}] 發送上線通知。"
-                )
-            except Exception as e:
-                log.error(f"無法在伺服器 [{guild.name}] 發送上線通知: {e}")
-
-
-@bot.tree.error
-async def on_app_command_error(
-    interaction: discord.Interaction, error: app_commands.AppCommandError
-) -> None:
-    """處理 Discord 斜線指令執行期間拋出的錯誤。"""
-    log.error(f"執行斜線指令時發生錯誤: {error}", exc_info=True)
-    message = "⚠️ 執行指令時發生錯誤，請稍後再試。"
-
-    if interaction.response.is_done():
-        await interaction.followup.send(message, ephemeral=True)
-    else:
-        await interaction.response.send_message(message, ephemeral=True)
-
-
-async def load_extensions() -> None:
-    """載入 `cogs` 目錄下的所有 Cog 擴充模組檔案。"""
-    for filename in os.listdir("./cogs"):
-        if filename.endswith(".py"):
-            await bot.load_extension(f"cogs.{filename[:-3]}")
-            log.info(f"✅ 已載入模組: {filename}")
+# ====================================
+# 註冊依賴服務 (Dependency Injection)
+# ====================================
+# 註冊 AI 服務提供者 (Gemini)
+bot.services.register_ai_service(GeminiService())
+# 註冊音樂搜尋服務提供者 (YouTube)
+bot.services.register_music_search_service(YouTubeSearchService())
 
 
 async def main() -> None:
-    """在非同步上下文管理器中啟動 Discord 機器人。"""
+    """
+    啟動 Discord 機器人的主要非同步函式。
+
+    使用非同步上下文管理器 (Async Context Manager) 來確保 Bot 的啟動與關閉
+    皆能妥善處理資源釋放。會檢查環境變數中是否存在 Discord Token，
+    若無則記錄嚴重錯誤並終止執行。
+    """
     async with bot:
-        if not TOKEN:
+        # 驗證 Discord Token 是否存在
+        if not config.token:
             log.critical(
                 "❌ 錯誤：找不到 DISCORD_TOKEN，請檢查 .env 檔案是否設定正確！"
             )
             return
 
-        await bot.start(TOKEN)
+        # 使用 Token 啟動 Bot 實例
+        await bot.start(config.token)
 
 
 if __name__ == "__main__":
     try:
         log.info("機器人系統正在啟動中...")
+        # 執行主要的非同步事件迴圈
         asyncio.run(main())
     except KeyboardInterrupt:
+        # 捕捉使用者中斷訊號 (Ctrl+C)，確保優雅關閉 (Graceful Shutdown)
         log.info("收到中斷訊號 (Ctrl+C)，機器人已安全關閉。")

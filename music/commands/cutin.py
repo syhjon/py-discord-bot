@@ -2,7 +2,7 @@
 import discord
 from discord import app_commands
 
-from music.context import InteractionContext
+from core.context import InteractionContext
 from music.services.playback import process_track_request
 
 
@@ -16,10 +16,13 @@ class CutinCommandMixin:
     @app_commands.describe(query="請輸入歌名或 YouTube 網址")
     async def cutin_command(self, interaction: discord.Interaction, query: str) -> None:
         ctx = InteractionContext(interaction)
-        if not query:
-            return await ctx.send("❌ 請提供要插播的歌曲名稱或 URL。")
 
         # 啟用插播，只抓 1 筆，不啟用選單
         await process_track_request(
-            ctx, query, self.ytdl, is_cutin=True, fetch_count=1, use_select_menu=False
+            ctx,
+            query,
+            self.youtube_service,
+            is_cutin=True,
+            fetch_count=1,
+            use_select_menu=False,
         )

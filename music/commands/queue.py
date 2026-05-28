@@ -2,9 +2,8 @@
 import discord
 from discord import app_commands
 
-from music.context import InteractionContext
-from music.player import get_player
-from music.utils import format_time
+from core.context import InteractionContext
+from music.services.queue_actions import show_queue
 
 
 class QueueCommandMixin:
@@ -23,22 +22,4 @@ class QueueCommandMixin:
         Notes:
             為了保持訊息簡潔並符合 Discord 訊息長度限制，系統預設僅顯示佇列中的前 10 首歌曲。
         """
-        ctx = InteractionContext(interaction)
-        player = get_player(ctx)
-
-        if len(player.queue) == 0:
-            return await ctx.send("目前沒有任何歌曲在佇列中。")
-
-        # 格式化佇列顯示字串
-        queue_str = "\n".join(
-            [
-                f"{i+1}. {song['title']} - `{format_time(song.get('duration', 0))}`"
-                for i, song in enumerate(player.queue[:10])
-            ]
-        )
-
-        # 若佇列長度超過 10 首，顯示省略提示
-        if len(player.queue) > 10:
-            queue_str += f"\n... 以及其他 {len(player.queue) - 10} 首歌曲"
-
-        await ctx.send(f"**播放佇列：**\n{queue_str}")
+        await show_queue(InteractionContext(interaction))

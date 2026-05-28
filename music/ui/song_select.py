@@ -2,7 +2,7 @@
 from typing import Any, Dict, List
 import discord
 
-from music.context import InteractionContext
+from core.context import InteractionContext
 from music.utils import format_time
 
 

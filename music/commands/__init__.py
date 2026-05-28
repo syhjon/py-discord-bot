@@ -10,11 +10,9 @@ Example:
     >>> from music.commands import PlayCommandMixin, StopCommandMixin
 """
 
-from .ask import AskCommandMixin
 from .clear import ClearCommandMixin
 from .cutin import CutinCommandMixin
 from .gg import GgCommandMixin
-from .help import HelpCommandMixin
 from .jump import JumpCommandMixin
 from .loop import LoopCommandMixin
 from .lyrics import LyricsCommandMixin
@@ -35,7 +33,6 @@ from .shuffle import ShuffleCommandMixin
 from .skip import SkipCommandMixin
 from .song import SongCommandMixin
 from .stop import StopCommandMixin
-from .sysinfo import SysInfoCommandMixin
 from .unmute import UnmuteCommandMixin
 from .voldown import VoldownCommandMixin
 from .volume import VolumeCommandMixin
@@ -44,11 +41,9 @@ from .volup import VolupCommandMixin
 
 # 定義公開介面，確保匯入時路徑清晰
 __all__ = [
-    "AskCommandMixin",
     "ClearCommandMixin",
     "CutinCommandMixin",
     "GgCommandMixin",
-    "HelpCommandMixin",
     "JumpCommandMixin",
     "LoopCommandMixin",
     "LyricsCommandMixin",
@@ -69,7 +64,6 @@ __all__ = [
     "SkipCommandMixin",
     "SongCommandMixin",
     "StopCommandMixin",
-    "SysInfoCommandMixin",
     "UnmuteCommandMixin",
     "VoldownCommandMixin",
     "VolumeCommandMixin",
