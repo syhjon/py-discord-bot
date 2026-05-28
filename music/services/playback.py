@@ -62,10 +62,30 @@ async def process_track_request(
         # UI 選單模式 (/song)
         # ========================
         if use_select_menu and len(raw_data) > 1:
-            # 建立互動式選單
-            view = discord.ui.View(timeout=60.0)
+            # 建立互動式選單，設定 20 秒逾時
+            view = discord.ui.View(timeout=20.0)
             view.add_item(SongSelect(raw_data, player, ctx))
-            await msg.edit(content="請從下拉選單中選擇你要播放的歌曲：", view=view)
+
+            # 定義逾時觸發的自我銷毀邏輯
+            async def on_timeout():
+                try:
+                    # 將原本的訊息修改為過期提示，並移除下拉選單元件 (view=None)
+                    # 若您希望連訊息本身都完全消失，可以將這裡改為： await msg.delete()
+                    await msg.edit(
+                        content="⏳ 點歌選單已過期 (超過 20 秒未選擇)。請重新輸入指令。",
+                        view=None,
+                    )
+                except discord.HTTPException:
+                    # 避免訊息已經被使用者手動刪除而導致報錯
+                    pass
+
+            # 綁定逾時事件
+            view.on_timeout = on_timeout
+
+            await msg.edit(
+                content="請從下列選單中選擇你要播放的歌曲 (20 秒後自動取消)：",
+                view=view,
+            )
             return
 
         # ========================

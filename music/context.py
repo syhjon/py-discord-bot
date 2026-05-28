@@ -27,7 +27,7 @@ class InteractionContext:
 
     @property
     def voice_client(self) -> Any:
-        """取得當前伺服器的語音客戶端 (Voice Client) 實例。"""
+        """取得目前伺服器的語音客戶端 (Voice Client) 實例。"""
         if not self.guild:
             return None
         return self.guild.voice_client
@@ -63,7 +63,7 @@ class InteractionContext:
         return await self.interaction.original_response()
 
     async def send_public(self, content: str | None = None, **kwargs: Any) -> Any:
-        """強制發送一則所有人皆可見的公開訊息至當前頻道。
+        """強制發送一則所有人皆可見的公開訊息至目前頻道。
 
         Args:
             content (str | None): 要發送的公開訊息內容。
