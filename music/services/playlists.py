@@ -9,13 +9,18 @@ def get_playlists_dir(base_file: str) -> str:
         base_file (str): 用於計算相對路徑的起始基準檔案路徑。
 
     Returns:
-        str: 專案層級 `playlists` 目錄的絕對路徑。
+        str: 專案層級 storage/playlists 目錄的絕對路徑。
 
     Notes:
         播放清單目錄被設定在 `music` 套件之外，以確保使用者資料與原始程式碼分離，
         便於維護與備份。
     """
-    return os.path.join(os.path.dirname(base_file), "..", "playlists")
+    return os.path.join(
+        os.path.dirname(base_file),
+        "..",
+        "storage",
+        "playlists",
+    )
 
 
 def ensure_playlists_dir(playlists_dir: str) -> None:
