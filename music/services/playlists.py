@@ -15,11 +15,13 @@ def get_playlists_dir(base_file: str) -> str:
         播放清單目錄被設定在 `music` 套件之外，以確保使用者資料與原始程式碼分離，
         便於維護與備份。
     """
-    return os.path.join(
-        os.path.dirname(base_file),
-        "..",
-        "storage",
-        "playlists",
+    return os.path.abspath(
+        os.path.join(
+            os.path.dirname(base_file),
+            "..",
+            "storage",
+            "playlists",
+        )
     )
 
 
@@ -35,5 +37,4 @@ def ensure_playlists_dir(playlists_dir: str) -> None:
     Notes:
         此函式設計為在 Cog 初始化時安全呼叫，以確保後續的讀寫操作不會失敗。
     """
-    if not os.path.exists(playlists_dir):
-        os.makedirs(playlists_dir)
+    os.makedirs(playlists_dir, exist_ok=True)
