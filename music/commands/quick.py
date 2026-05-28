@@ -1,4 +1,4 @@
-# music/commands/quick.py
+# music/commands/quick.py - 提供快速播放功能的指令 Mixin
 from typing import Optional
 from discord.ext import commands
 

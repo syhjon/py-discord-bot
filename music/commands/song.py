@@ -1,4 +1,4 @@
-# music/commands/song.py
+# music/commands/song.py - 提供一般點歌功能的指令 Mixin
 from typing import Optional
 from discord.ext import commands
 

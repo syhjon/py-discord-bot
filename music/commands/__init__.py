@@ -35,6 +35,7 @@ from .shuffle import ShuffleCommandMixin
 from .skip import SkipCommandMixin
 from .song import SongCommandMixin
 from .stop import StopCommandMixin
+from .sysinfo import SysInfoCommandMixin
 from .unmute import UnmuteCommandMixin
 from .voldown import VoldownCommandMixin
 from .volume import VolumeCommandMixin
@@ -68,6 +69,7 @@ __all__ = [
     "SkipCommandMixin",
     "SongCommandMixin",
     "StopCommandMixin",
+    "SysInfoCommandMixin",
     "UnmuteCommandMixin",
     "VoldownCommandMixin",
     "VolumeCommandMixin",

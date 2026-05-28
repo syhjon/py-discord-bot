@@ -1,4 +1,4 @@
-# music/commands/cutin.py
+# music/commands/cutin.py - 提供插播 (Cut-in) 功能的指令 Mixin
 from typing import Optional
 from discord.ext import commands
 

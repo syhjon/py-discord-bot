@@ -15,15 +15,10 @@ from dotenv import load_dotenv
 # 引入抽離出去的核心日誌服務
 from core.logger import setup_logging
 
-# 1. 啟動全域日誌系統
+# 啟動全域日誌系統
 log = setup_logging("MusicBot")
 
-# ====== 新增這兩行來靜音 discord.py 底層的 INFO 日誌 ======
-logging.getLogger("discord.player").setLevel(logging.WARNING)
-logging.getLogger("discord.voice_state").setLevel(logging.WARNING)
-# =======================================================
-
-# 2. 載入環境變數與 Discord 設定
+# 載入環境變數與 Discord 設定
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -54,7 +49,7 @@ class CustomBot(commands.Bot):
         ignore_events = ["socket_raw_receive", "socket_raw_send", "socket_response"]
 
         if event_name not in ignore_events:
-            log.info(f"[事件攔截] ⚡ 觸發事件: on_{event_name}")
+            log.info(f"[事件攔截]觸發事件: on_{event_name}")
 
         super().dispatch(event_name, *args, **kwargs)
 
