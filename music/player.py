@@ -61,6 +61,7 @@ class MusicPlayer:
         self.panel_view: discord.ui.View | None = None
         self.private_panel_message: discord.Message | None = None
         self.private_panel_view: discord.ui.View | None = None
+        self.private_panel_owner_id: int | None = None
         self.panel_page = 0
         self.panel_lock = asyncio.Lock()
         self.closed = False
@@ -84,6 +85,17 @@ class MusicPlayer:
                 "音樂播放背景任務異常終止。",
                 exc_info=(type(error), error, error.__traceback__),
             )
+
+    def _ensure_panel_tracking_attrs(self) -> None:
+        """補齊面板追蹤欄位，支援熱重載前建立的播放器物件。"""
+        if not hasattr(self, "panel_view"):
+            self.panel_view = None
+        if not hasattr(self, "private_panel_message"):
+            self.private_panel_message = None
+        if not hasattr(self, "private_panel_view"):
+            self.private_panel_view = None
+        if not hasattr(self, "private_panel_owner_id"):
+            self.private_panel_owner_id = None
 
     def update_context(
         self,
@@ -314,12 +326,17 @@ class MusicPlayer:
 
         Notes:
             若面板訊息仍存在，永遠優先編輯原訊息；只有原訊息被刪除或尚未建立時才會重新發送。
-            若目前存在私人面板，會先移除私人面板，確保同一時間只有一個播放器介面可操作。
+            若目前只有私人面板，會更新該私人面板，避免把正在使用的介面退役。
         """
+        self._ensure_panel_tracking_attrs()
         if self.closed or not self.is_active:
             return
 
         async with self.panel_lock:
+            if self.private_panel_message and not self.panel_message:
+                if await self._refresh_private_panel_unlocked(status_msg):
+                    return
+
             await self._retire_private_panel_unlocked()
 
             self.panel_page = self.clamp_queue_page(self.panel_page)
@@ -328,13 +345,12 @@ class MusicPlayer:
 
             if self.panel_message:
                 previous_view = self.panel_view
+                self._release_panel_view(previous_view)
                 try:
                     await self.panel_message.edit(embed=embed, view=view)
-                    self._release_panel_view(previous_view)
                     self.panel_view = view
                     return
                 except discord.NotFound:
-                    self._release_panel_view(previous_view)
                     self.panel_message = None
                     self.panel_view = None
                 except discord.HTTPException as e:
@@ -372,6 +388,7 @@ class MusicPlayer:
         Notes:
             建立私人面板前會先移除目前的公開或私人面板，避免同時存在兩個可操作的播放器介面。
         """
+        self._ensure_panel_tracking_attrs()
         if self.closed or not self.is_active:
             return None
 
@@ -394,16 +411,57 @@ class MusicPlayer:
                 timeout=None,
             )
 
+            self.private_panel_owner_id = owner_id
             self.private_panel_view = view
             try:
                 message = await ctx.send(embed=embed, view=view)
             except discord.HTTPException:
+                self.private_panel_owner_id = None
                 self.private_panel_view = None
                 self._release_panel_view(view)
                 raise
 
             self.private_panel_message = message
             return message
+
+    async def _refresh_private_panel_unlocked(
+        self,
+        status_msg: str | None,
+    ) -> bool:
+        """在已持有 panel_lock 時更新目前的私人面板。"""
+        message = self.private_panel_message
+        if not message:
+            return False
+
+        self.panel_page = self.clamp_queue_page(self.panel_page)
+        embed = self.build_panel_embed(page=self.panel_page, status_msg=status_msg)
+        owner_id = self.private_panel_owner_id
+        if owner_id is None:
+            owner_id = getattr(self.private_panel_view, "owner_id", None)
+
+        view = PlayerControls(
+            self,
+            owner_id=owner_id,
+            page=self.panel_page,
+            timeout=None,
+        )
+        previous_view = self.private_panel_view
+
+        self._release_panel_view(previous_view)
+        try:
+            await message.edit(embed=embed, view=view)
+            self.private_panel_view = view
+            self.private_panel_owner_id = owner_id
+            return True
+        except discord.NotFound:
+            self.private_panel_message = None
+            self.private_panel_view = None
+            self.private_panel_owner_id = None
+            return False
+        except discord.HTTPException as e:
+            self._release_panel_view(view)
+            log.warning(f"更新私人播放器面板失敗: {e}")
+            return True
 
     async def hide_public_panel(self) -> None:
         """讓公開播放器面板不可見或不可控制。
@@ -415,11 +473,13 @@ class MusicPlayer:
             系統會優先刪除訊息以達到不可見；若 Discord 權限或 API 狀態不允許刪除，
             則退回清空訊息內容與控制元件，確保使用者不能再操作舊面板。
         """
+        self._ensure_panel_tracking_attrs()
         async with self.panel_lock:
             await self._retire_public_panel_unlocked()
 
     async def hide_all_panels(self) -> None:
         """移除所有播放器控制面板並釋放 View 引用。"""
+        self._ensure_panel_tracking_attrs()
         async with self.panel_lock:
             await self._retire_public_panel_unlocked()
             await self._retire_private_panel_unlocked()
@@ -444,6 +504,7 @@ class MusicPlayer:
 
         self.private_panel_message = None
         self.private_panel_view = None
+        self.private_panel_owner_id = None
         await self._retire_panel_message(message, view)
 
     def _release_panel_view(self, view: discord.ui.View | None) -> None:

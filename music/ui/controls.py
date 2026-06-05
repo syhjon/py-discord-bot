@@ -106,46 +106,12 @@ class PlayerControls(discord.ui.View):
         Returns:
             bool: 允許操作時為 True；否則會發送僅該使用者可見的提示並回傳 False。
         """
-        if not self._is_current_registered_panel(interaction):
-            await interaction.response.send_message(
-                "❌ 這個播放器面板已失效，請使用最新的面板。",
-                ephemeral=True,
-            )
-            return False
-
         if self.owner_id is None or interaction.user.id == self.owner_id:
             return True
 
         await interaction.response.send_message(
             "❌ 這個私人播放器面板不是給你操作的。", ephemeral=True
         )
-        return False
-
-    def _is_current_registered_panel(self, interaction: discord.Interaction) -> bool:
-        """確認此 View 仍是播放器目前登記中的有效面板。
-
-        Args:
-            interaction (discord.Interaction): Discord 按鈕互動上下文。
-
-        Returns:
-            bool: 此互動訊息與 View 皆為目前最新面板時回傳 True。
-        """
-        if not interaction.message:
-            return False
-
-        message_id = interaction.message.id
-        public_message = self.player.panel_message
-        private_message = self.player.private_panel_message
-
-        if public_message and message_id == public_message.id:
-            return self.player.panel_view is self
-        if private_message and message_id == private_message.id:
-            return self.player.private_panel_view is self
-        if not public_message and not private_message:
-            return (
-                self.player.panel_view is self
-                or self.player.private_panel_view is self
-            )
         return False
 
     async def _ensure_active(self, interaction: discord.Interaction) -> bool:
