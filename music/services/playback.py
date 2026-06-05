@@ -45,7 +45,7 @@ async def process_track_request(
         await voice_state.channel.connect()
 
     msg = await ctx.send(f"🔍 正在搜尋並處理歌曲：`{query}` ...")
-    player = get_player(ctx)
+    player = get_player(ctx, search_service=search_service)
 
     fetch_task = None
     raw_data = None
@@ -111,7 +111,10 @@ async def process_track_request(
                 if player.current:
                     player.queue.insert(0, player.current)
                 player.queue.insert(0, song_info)
-                ctx.voice_client.stop()
+                player.request_next_track()
+                await player.refresh_public_panel(
+                    f"🎶 已插播：{song_info['title']}"
+                )
                 await msg.edit(
                     content=f"🎶 已將 **{song_info['title']}** 插播並開始播放！原歌曲已排到下一首。"
                 )

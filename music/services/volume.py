@@ -8,7 +8,7 @@
 """
 
 from core.context import InteractionContext
-from music.player import get_player
+from music.player import get_existing_player, get_player
 
 
 async def set_volume(ctx: InteractionContext, vol: int) -> None:
@@ -34,6 +34,7 @@ async def set_volume(ctx: InteractionContext, vol: int) -> None:
     if ctx.voice_client and ctx.voice_client.source:
         ctx.voice_client.source.volume = player.volume
 
+    await player.refresh_public_panel(f"🔊 音量已設定為 {vol}%。")
     await ctx.send(f"🔊 音量已設定為 {vol}%。")
 
 
@@ -54,6 +55,7 @@ async def increase_volume(ctx: InteractionContext) -> None:
     if ctx.voice_client and ctx.voice_client.source:
         ctx.voice_client.source.volume = player.volume
 
+    await player.refresh_public_panel(f"🔊 音量已增加至 {int(new_vol * 100)}%。")
     await ctx.send(f"🔊 音量已增加至 {int(new_vol * 100)}%。")
 
 
@@ -74,6 +76,7 @@ async def decrease_volume(ctx: InteractionContext) -> None:
     if ctx.voice_client and ctx.voice_client.source:
         ctx.voice_client.source.volume = player.volume
 
+    await player.refresh_public_panel(f"🔉 音量已降低至 {int(new_vol * 100)}%。")
     await ctx.send(f"🔉 音量已降低至 {int(new_vol * 100)}%。")
 
 
@@ -84,7 +87,10 @@ async def check_volume(ctx: InteractionContext) -> None:
     Args:
         ctx (InteractionContext): 封裝了 Discord 互動狀態的上下文物件。
     """
-    player = get_player(ctx)
+    player = get_existing_player(ctx)
+    if not player:
+        return await ctx.send("目前沒有播放器音量可以查詢。")
+
     await ctx.send(f"🔊 目前音量為：{int(player.volume * 100)}%")
 
 
@@ -109,6 +115,7 @@ async def mute(ctx: InteractionContext) -> None:
         if ctx.voice_client and ctx.voice_client.source:
             ctx.voice_client.source.volume = 0.0
 
+        await player.refresh_public_panel("🔇 機器人已靜音。")
         await ctx.send("🔇 機器人已靜音。")
     else:
         await ctx.send("🔇 機器人已經是靜音狀態。")
@@ -135,6 +142,7 @@ async def unmute(ctx: InteractionContext) -> None:
 
         # 清除暫存
         player.previous_volume = None
+        await player.refresh_public_panel("🔊 機器人已取消靜音。")
         await ctx.send("🔊 機器人已取消靜音。")
     elif player.volume > 0:
         await ctx.send("🔊 機器人目前不是靜音狀態。")

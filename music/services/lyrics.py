@@ -55,9 +55,9 @@ class LyricsService:
             ctx (InteractionContext): 封裝了 Discord 互動狀態的上下文物件。
         """
         # 延遲匯入以避免循環依賴 (Circular Dependency)
-        from music.player import get_player
+        from music.player import get_existing_player
 
-        player = get_player(ctx)
+        player = get_existing_player(ctx)
 
         # 1. 防呆：確認有歌曲正在播放
         if not player or not player.current:

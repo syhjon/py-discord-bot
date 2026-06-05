@@ -1,14 +1,16 @@
-# music/player.py - 管理播放佇列、語音播放、循環模式與跳轉邏輯
+# music/player.py - 管理播放佇列、語音播放、循環模式、固定播放器面板與資源清理
 import asyncio
+import gc
 import logging
 import time
+from typing import Any
 
 import discord
 
 from core.context import InteractionContext
 from music.services import create_player_ytdl
 from music.ui import PlayerControls
-from music.utils import format_time
+from music.utils import create_progress_bar, format_time
 
 log = logging.getLogger("MusicBot")
 
@@ -16,11 +18,19 @@ log = logging.getLogger("MusicBot")
 class MusicPlayer:
     """管理單一語音頻道（Guild）的音樂播放狀態。"""
 
-    def __init__(self, ctx: InteractionContext) -> None:
+    QUEUE_PAGE_SIZE = 10
+
+    def __init__(
+        self,
+        ctx: InteractionContext,
+        search_service: Any | None = None,
+    ) -> None:
         """初始化該伺服器的播放器狀態。
 
         Args:
             ctx (InteractionContext): 用於識別機器人、伺服器與文字頻道的上下文。
+            search_service (Any | None, optional): 可供播放器面板「點歌」按鈕使用的搜尋服務。
+                若未提供，面板仍可控制既有播放，但無法從 UI 直接新增歌曲。
 
         Returns:
             None.
@@ -31,6 +41,7 @@ class MusicPlayer:
         self.bot = ctx.bot
         self.guild = ctx.guild
         self.channel = ctx.channel
+        self.search_service = search_service
         self.queue = []
         self.history = []  # 用來存 previous
         self.next = asyncio.Event()
@@ -46,6 +57,14 @@ class MusicPlayer:
         self.current_song_start_offset = 0  # 記錄目前播放歌曲的起始偏移量，供進度條計算
 
         self.ytdl = create_player_ytdl()
+        self.panel_message: discord.Message | None = None
+        self.panel_page = 0
+        self.panel_lock = asyncio.Lock()
+        self.closed = False
+        self.created_timestamp = time.time()
+        self.has_started_playback = False
+        self._force_advance = False
+        self._force_add_history = True
 
         # 將背景任務存為實例變數，方便後續安全取消
         self.player_task = self.bot.loop.create_task(self.player_loop())
@@ -63,14 +82,397 @@ class MusicPlayer:
                 exc_info=(type(error), error, error.__traceback__),
             )
 
+    def update_context(
+        self,
+        ctx: InteractionContext,
+        search_service: Any | None = None,
+    ) -> None:
+        """更新播放器可使用的互動上下文資料。
+
+        Args:
+            ctx (InteractionContext): 最新一次觸發播放相關操作的 Discord 上下文。
+            search_service (Any | None, optional): 可替換或補齊的音樂搜尋服務。
+
+        Returns:
+            None.
+
+        Notes:
+            已存在公開面板時不會搬移所在頻道，以避免點歌或切歌時產生新的播放器訊息。
+        """
+        if not self.panel_message:
+            self.channel = ctx.channel
+        if search_service is not None:
+            self.search_service = search_service
+
+    @property
+    def is_active(self) -> bool:
+        """判斷播放器目前是否仍有可控制的播放狀態。
+
+        Returns:
+            bool: 仍有歌曲、待播佇列或語音播放狀態時回傳 True。
+        """
+        if self.closed:
+            return False
+
+        vc = self.guild.voice_client if self.guild else None
+        has_voice_activity = bool(
+            vc and (vc.is_playing() or vc.is_paused())
+        )
+        return bool(self.current or self.queue or has_voice_activity)
+
+    def get_loop_mode_label(self) -> str:
+        """取得目前循環模式的人類可讀名稱。
+
+        Returns:
+            str: `關閉`、`單曲` 或 `佇列`。
+        """
+        if self.loop_mode == 0:
+            return "關閉"
+        return "單曲" if self.loop_mode == 1 else "佇列"
+
+    def get_playback_status_label(self) -> str:
+        """取得目前語音播放狀態的人類可讀名稱。
+
+        Returns:
+            str: 播放中、已暫停、準備中或已停止。
+        """
+        vc = self.guild.voice_client if self.guild else None
+        if vc and vc.is_paused():
+            return "已暫停"
+        if vc and vc.is_playing():
+            return "播放中"
+        if self.current or self.queue:
+            return "準備中"
+        return "已停止"
+
+    def get_queue_page_count(self) -> int:
+        """計算待播佇列分頁總數。
+
+        Returns:
+            int: 分頁總數；佇列為空時仍回傳 1，方便 UI 顯示空頁。
+        """
+        if not self.queue:
+            return 1
+        return max(
+            1,
+            (len(self.queue) + self.QUEUE_PAGE_SIZE - 1) // self.QUEUE_PAGE_SIZE,
+        )
+
+    def clamp_queue_page(self, page: int) -> int:
+        """將指定頁碼限制在目前佇列可顯示的範圍內。
+
+        Args:
+            page (int): 使用者目前要求顯示的 0-based 頁碼。
+
+        Returns:
+            int: 校正後的 0-based 頁碼。
+        """
+        return min(max(page, 0), self.get_queue_page_count() - 1)
+
+    def build_panel_embed(
+        self,
+        *,
+        page: int = 0,
+        status_msg: str | None = None,
+    ) -> discord.Embed:
+        """依目前播放器狀態建立播放器面板 Embed。
+
+        Args:
+            page (int, optional): 待播歌單的 0-based 分頁頁碼。預設為 0。
+            status_msg (str | None, optional): 顯示在頁尾的操作狀態訊息。
+
+        Returns:
+            discord.Embed: 可直接發送或編輯至 Discord 訊息的播放器面板。
+        """
+        page = self.clamp_queue_page(page)
+        current = self.current
+        title = "🎛️ 音樂播放器"
+        embed_kwargs: dict[str, Any] = {
+            "title": title,
+            "color": (
+                discord.Color.green()
+                if self.is_active
+                else discord.Color.dark_grey()
+            ),
+        }
+
+        if current and current.get("webpage_url"):
+            embed_kwargs["url"] = current["webpage_url"]
+
+        embed = discord.Embed(**embed_kwargs)
+        if current:
+            embed.set_author(name=current.get("uploader", "未知"))
+            embed.add_field(
+                name="目前曲目",
+                value=self._format_song_link(current),
+                inline=False,
+            )
+            if current.get("thumbnail"):
+                embed.set_thumbnail(url=current["thumbnail"])
+        elif self.queue:
+            embed.add_field(
+                name="目前曲目",
+                value="正在準備播放下一首歌曲。",
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="目前曲目",
+                value="目前沒有播放中的歌曲。",
+                inline=False,
+            )
+
+        duration = current.get("duration", 0) if current else 0
+        current_time = self.get_current_time() if current else 0
+        remaining_time = max(duration - current_time, 0) if duration else 0
+        progress_bar = create_progress_bar(current_time, duration)
+
+        embed.description = (
+            f"狀態：`{self.get_playback_status_label()}`\n"
+            f"進度：`{progress_bar}`\n"
+            f"時間：`{format_time(current_time)} / {format_time(duration)}`"
+            f"　剩餘：`{format_time(remaining_time)}`\n"
+            f"音量：`{int(self.volume * 100)}%`　"
+            f"循環：`{self.get_loop_mode_label()}`　"
+            f"待播：`{len(self.queue)}`"
+        )
+
+        queue_value = self._format_queue_page(page)
+        embed.add_field(
+            name=f"待播歌單 第 {page + 1}/{self.get_queue_page_count()} 頁",
+            value=queue_value,
+            inline=False,
+        )
+
+        footer_text = status_msg or "使用下方按鈕控制播放與歌單。"
+        embed.set_footer(text=f"操作狀態：{footer_text}")
+        return embed
+
+    def _format_song_link(self, song: dict[str, Any]) -> str:
+        """將歌曲資訊轉為可放入 Embed 的短字串。
+
+        Args:
+            song (dict[str, Any]): 歌曲 metadata，至少應包含 title，可能包含 webpage_url 與 duration。
+
+        Returns:
+            str: 已截斷並帶有時長資訊的顯示字串。
+        """
+        title = self._truncate(song.get("title", "未知曲目"), 80)
+        duration = format_time(song.get("duration", 0))
+        url = song.get("webpage_url")
+        if url:
+            return f"[{title}]({url}) - `{duration}`"
+        return f"{title} - `{duration}`"
+
+    def _format_queue_page(self, page: int) -> str:
+        """格式化指定頁面的待播歌曲清單。
+
+        Args:
+            page (int): 0-based 分頁頁碼。
+
+        Returns:
+            str: 最多十首歌曲的編號、標題與時長；若佇列為空則回傳空佇列提示。
+        """
+        if not self.queue:
+            return "佇列目前是空的。"
+
+        start = page * self.QUEUE_PAGE_SIZE
+        end = start + self.QUEUE_PAGE_SIZE
+        lines = []
+        for index, song in enumerate(self.queue[start:end], start=start + 1):
+            title = self._truncate(song.get("title", "未知曲目"), 70)
+            duration = format_time(song.get("duration", 0))
+            lines.append(f"`{index:02d}.` {title} - `{duration}`")
+
+        return "\n".join(lines)
+
+    def _truncate(self, value: str, limit: int) -> str:
+        """將過長字串截斷為 Discord UI 易讀的長度。
+
+        Args:
+            value (str): 原始字串。
+            limit (int): 最大字元數。
+
+        Returns:
+            str: 未超過指定長度的字串。
+        """
+        if len(value) <= limit:
+            return value
+        return value[: limit - 3] + "..."
+
+    async def refresh_public_panel(self, status_msg: str | None = None) -> None:
+        """建立或原地更新公開播放器面板。
+
+        Args:
+            status_msg (str | None, optional): 要顯示在面板頁尾的操作狀態。
+
+        Returns:
+            None.
+
+        Notes:
+            若面板訊息仍存在，永遠優先編輯原訊息；只有原訊息被刪除或尚未建立時才會重新發送。
+        """
+        if self.closed or not self.is_active:
+            return
+
+        async with self.panel_lock:
+            self.panel_page = self.clamp_queue_page(self.panel_page)
+            embed = self.build_panel_embed(page=self.panel_page, status_msg=status_msg)
+            view = PlayerControls(self, page=self.panel_page)
+
+            if self.panel_message:
+                try:
+                    await self.panel_message.edit(embed=embed, view=view)
+                    return
+                except discord.NotFound:
+                    self.panel_message = None
+                except discord.HTTPException as e:
+                    log.warning(f"更新播放器面板失敗: {e}")
+                    return
+
+            if not self.channel:
+                return
+
+            try:
+                self.panel_message = await self.channel.send(embed=embed, view=view)
+            except discord.HTTPException as e:
+                log.warning(f"建立播放器面板失敗: {e}")
+
+    async def hide_public_panel(self) -> None:
+        """讓公開播放器面板不可見或不可控制。
+
+        Returns:
+            None.
+
+        Notes:
+            系統會優先刪除訊息以達到不可見；若 Discord 權限或 API 狀態不允許刪除，
+            則退回編輯為停用狀態，確保使用者不能再操作舊面板。
+        """
+        message = self.panel_message
+        self.panel_message = None
+        if not message:
+            return
+
+        try:
+            await message.delete()
+            return
+        except discord.NotFound:
+            return
+        except discord.HTTPException:
+            pass
+
+        disabled_view = PlayerControls(self, page=self.panel_page)
+        disabled_view.disable_all_controls()
+        try:
+            await message.edit(content="播放器已停止。", embed=None, view=disabled_view)
+        except discord.HTTPException:
+            pass
+
+    def request_next_track(self) -> bool:
+        """要求播放器跳到下一首歌曲。
+
+        Returns:
+            bool: 成功送出切歌請求時回傳 True；目前沒有可停止的音訊時回傳 False。
+
+        Notes:
+            此方法會暫時覆蓋單曲循環，確保使用者按下下一首或跳過時不會重播同一首。
+        """
+        vc = self.guild.voice_client if self.guild else None
+        if not vc or not (vc.is_playing() or vc.is_paused()):
+            return False
+
+        self._force_advance = True
+        self._force_add_history = True
+        vc.stop()
+        return True
+
+    def request_previous_track(self) -> bool:
+        """要求播放器回到上一首歌曲。
+
+        Returns:
+            bool: 成功送出上一首請求時回傳 True；沒有歷史紀錄或無法停止音訊時回傳 False。
+        """
+        vc = self.guild.voice_client if self.guild else None
+        if not vc or not (vc.is_playing() or vc.is_paused()):
+            return False
+        if not self.history:
+            return False
+
+        previous_song = self.history.pop()
+        if self.current:
+            self.queue.insert(0, self.current)
+        self.queue.insert(0, previous_song)
+        self._force_advance = True
+        self._force_add_history = True
+        vc.stop()
+        return True
+
+    def request_seek(self, seconds: int) -> bool:
+        """要求播放器從指定秒數重新播放目前歌曲。
+
+        Args:
+            seconds (int): 欲跳轉的目標秒數，必須大於或等於 0。
+
+        Returns:
+            bool: 成功送出跳轉請求時回傳 True；目前無法跳轉時回傳 False。
+
+        Notes:
+            Discord VoiceClient 不支援熱跳轉，因此此方法會把目前歌曲放回佇列頂端，
+            再透過 FFmpeg `-ss` 參數於下一輪播放時從指定時間開始。
+        """
+        vc = self.guild.voice_client if self.guild else None
+        if seconds < 0 or not self.current or not vc:
+            return False
+        if not (vc.is_playing() or vc.is_paused()):
+            return False
+
+        self.seek_offset = seconds
+        self.queue.insert(0, self.current)
+        self._force_advance = True
+        self._force_add_history = False
+        vc.stop()
+        return True
+
     async def cleanup(self) -> None:
         """清理播放器資源，優雅關閉 FFmpeg 與背景任務。"""
+        await self.shutdown()
+
+    async def shutdown(
+        self,
+        *,
+        disconnect: bool = True,
+        remove_from_registry: bool = True,
+    ) -> None:
+        """停止播放器並釋放該 Guild 的音樂資源。
+
+        Args:
+            disconnect (bool, optional): 是否中斷語音連線。預設為 True。
+            remove_from_registry (bool, optional): 是否從全域播放器快取移除。預設為 True。
+
+        Returns:
+            None.
+
+        Notes:
+            當播放自然結束或使用者執行停止指令時呼叫此方法，面板會被刪除或停用，
+            佇列與歷史資料會清空，最後觸發 Python 垃圾回收釋放 yt-dlp/FFmpeg 相關引用。
+        """
+        if self.closed:
+            return
+
+        self.closed = True
         self.queue.clear()
+        self.history.clear()
+        self.current = None
         self.loop_mode = 0
+        self.seek_offset = 0
+        self.current_song_start_offset = 0
+        self.next.set()
 
         # 若有動態歌詞任務，予以安全取消
         if hasattr(self, "lyrics_task") and self.lyrics_task:
             self.lyrics_task.cancel()
+
+        await self.hide_public_panel()
 
         # 安全停止音樂與斷開連線，這會讓 discord.py 正常發送 SIGTERM 給 FFmpeg
         if self.guild.voice_client:
@@ -79,11 +481,24 @@ class MusicPlayer:
                 or self.guild.voice_client.is_paused()
             ):
                 self.guild.voice_client.stop()
-            await self.guild.voice_client.disconnect(force=False)
+            if disconnect:
+                await self.guild.voice_client.disconnect(force=False)
 
         # 取消主播放迴圈任務
-        if self.player_task and not self.player_task.done():
+        current_task = asyncio.current_task()
+        if (
+            self.player_task
+            and not self.player_task.done()
+            and self.player_task is not current_task
+        ):
             self.player_task.cancel()
+
+        if remove_from_registry and self.guild:
+            players.pop(self.guild.id, None)
+
+        self.search_service = None
+        self.ytdl = None
+        gc.collect()
 
     def pause_time(self) -> None:
         """記錄播放暫停時的時間戳記。
@@ -164,6 +579,8 @@ class MusicPlayer:
         Notes:
             插入至最前端的操作為靜默執行，因為呼叫者通常會自行處理回覆訊息。
         """
+        self.update_context(ctx)
+
         if insert_at_front:
             self.queue.insert(0, song_info)
         else:
@@ -176,6 +593,10 @@ class MusicPlayer:
                 await ctx.send(
                     f"✅ 已將 **{song_info['title']}** 加入播放佇列！ (目前排在第 {len(self.queue)} 首)"
                 )
+
+        await self.refresh_public_panel(
+            f"已加入：{self._truncate(song_info.get('title', '未知曲目'), 40)}"
+        )
 
     async def player_loop(self) -> None:
         """伺服器的音樂播放主迴圈。
@@ -196,6 +617,14 @@ class MusicPlayer:
                 self.next.clear()
 
                 if not self.current and len(self.queue) == 0:
+                    if self.has_started_playback:
+                        await self.shutdown()
+                        break
+
+                    if time.time() - self.created_timestamp > 60:
+                        await self.shutdown(disconnect=False)
+                        break
+
                     await asyncio.sleep(1)
                     continue
 
@@ -231,12 +660,18 @@ class MusicPlayer:
                     except Exception as e:
                         log.exception(f"即時解析歌曲失敗: {e}")
                         self.current = None
+                        if not self.queue:
+                            await self.shutdown()
+                            break
                         self.bot.loop.call_soon_threadsafe(self.next.set)
                         continue
 
                 if not self.guild.voice_client:
                     log.warning("播放前語音連線已不存在，略過目前歌曲。")
                     self.current = None
+                    if not self.queue:
+                        await self.shutdown(disconnect=False)
+                        break
                     continue
 
                 # 組裝 FFmpeg 選項 (必須將 -ss 放在 -reconnect 前面以提升跳轉速度)
@@ -263,6 +698,9 @@ class MusicPlayer:
                             f"⚠️ 建立音訊來源失敗，已略過：**{self.current.get('title', '未知曲目')}**"
                         )
                     self.current = None
+                    if not self.queue:
+                        await self.shutdown()
+                        break
                     continue
 
                 self.start_timestamp = time.time()
@@ -293,8 +731,13 @@ class MusicPlayer:
                             exc_info=(type(error), error, error.__traceback__),
                         )
 
-                    if self.loop_mode == 0:  # 關閉循環
-                        if finished_song:
+                    force_advance = self._force_advance
+                    force_add_history = self._force_add_history
+                    self._force_advance = False
+                    self._force_add_history = True
+
+                    if force_advance or self.loop_mode == 0:  # 關閉循環或手動切歌
+                        if finished_song and force_add_history:
                             self.history.append(finished_song)
                             if len(self.history) > 20:
                                 self.history.pop(0)
@@ -309,22 +752,11 @@ class MusicPlayer:
 
                     self.bot.loop.call_soon_threadsafe(self.next.set)
 
-                # 若非跳轉指令則發送播放面板
+                # 若非跳轉指令則更新固定播放面板；切歌不會建立新的播放器訊息。
                 if current_seek == 0:
-                    embed_kwargs = {
-                        "title": f"🎶 正在播放：{self.current['title']}",
-                        "color": discord.Color.green(),
-                    }
-                    if self.current.get("webpage_url"):
-                        embed_kwargs["url"] = self.current["webpage_url"]
-                    embed = discord.Embed(**embed_kwargs)
-                    embed.set_author(name=self.current.get("uploader", "未知"))
-                    embed.description = (
-                        f"⏱️ 時長：{format_time(self.current.get('duration'))}"
+                    await self.refresh_public_panel(
+                        f"正在播放：{self._truncate(self.current.get('title', '未知曲目'), 40)}"
                     )
-                    if self.current.get("thumbnail"):
-                        embed.set_thumbnail(url=self.current["thumbnail"])
-                    await self.channel.send(embed=embed, view=PlayerControls(self))
 
                 try:
                     self.guild.voice_client.play(volume_source, after=after_play)
@@ -335,8 +767,12 @@ class MusicPlayer:
                             f"⚠️ 啟動播放失敗，已略過：**{self.current.get('title', '未知曲目')}**"
                         )
                     self.current = None
+                    if not self.queue:
+                        await self.shutdown()
+                        break
                     continue
 
+                self.has_started_playback = True
                 log.info(f"開始播放: {self.current.get('title', '未知曲目')}")
                 await self.next.wait()
 
@@ -345,14 +781,36 @@ class MusicPlayer:
             pass
 
 
-players = {}
+players: dict[int, MusicPlayer] = {}
 
 
-def get_player(ctx: InteractionContext) -> MusicPlayer:
+def get_existing_player(ctx: InteractionContext) -> MusicPlayer | None:
+    """取得已存在且尚未關閉的伺服器播放器。
+
+    Args:
+        ctx (InteractionContext): 用於識別伺服器的內容上下文。
+
+    Returns:
+        MusicPlayer | None: 找得到活躍播放器時回傳該實例，否則回傳 None。
+    """
+    if not ctx.guild:
+        return None
+
+    player = players.get(ctx.guild.id)
+    if not player or player.closed:
+        return None
+    return player
+
+
+def get_player(
+    ctx: InteractionContext,
+    search_service: Any | None = None,
+) -> MusicPlayer:
     """取得該伺服器的專屬播放器實例。
 
     Args:
         ctx (InteractionContext): 用於識別伺服器的內容上下文。
+        search_service (Any | None, optional): 可供播放器 UI 點歌功能使用的搜尋服務。
 
     Returns:
         MusicPlayer: 該伺服器活躍的播放器實例。
@@ -360,8 +818,24 @@ def get_player(ctx: InteractionContext) -> MusicPlayer:
     Notes:
         若機器人被強制斷線但佇列內仍有歌曲，則會自動重建播放器實例。
     """
-    if ctx.guild.id not in players:
-        players[ctx.guild.id] = MusicPlayer(ctx)
-    if ctx.voice_client is None and len(players[ctx.guild.id].queue) > 0:
-        players[ctx.guild.id] = MusicPlayer(ctx)
-    return players[ctx.guild.id]
+    if not ctx.guild:
+        raise RuntimeError("音樂播放器只能在 Discord 伺服器中建立。")
+
+    player = players.get(ctx.guild.id)
+    if not player or player.closed:
+        player = MusicPlayer(ctx, search_service=search_service)
+        players[ctx.guild.id] = player
+        return player
+
+    if ctx.voice_client is None and len(player.queue) > 0:
+        awaitable_cleanup = player.shutdown(
+            disconnect=False,
+            remove_from_registry=False,
+        )
+        ctx.bot.loop.create_task(awaitable_cleanup)
+        player = MusicPlayer(ctx, search_service=search_service)
+        players[ctx.guild.id] = player
+        return player
+
+    player.update_context(ctx, search_service=search_service)
+    return player

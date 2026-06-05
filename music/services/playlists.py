@@ -10,6 +10,7 @@
 import json
 import os
 import re
+from typing import Any
 
 from core.context import InteractionContext
 
@@ -64,16 +65,16 @@ async def save_current_queue(ctx: InteractionContext, playlist_name: str) -> Non
         playlist_name (str): 使用者欲命名的播放清單名稱。
     """
     # 延遲匯入以避免潛在的循環依賴 (Circular Dependency)
-    from music.player import get_player
+    from music.player import get_existing_player
 
     if not playlist_name:
         return await ctx.send(
             "請提供播放清單名稱。\n用法: /saveplaylist <播放清單名稱>"
         )
 
-    player = get_player(ctx)
+    player = get_existing_player(ctx)
     # 防呆：確保有資料可以儲存
-    if not player.queue and not player.current:
+    if not player or (not player.queue and not player.current):
         return await ctx.send("目前播放佇列中沒有歌曲，無法儲存。")
 
     playlists_dir = os.path.join(os.getcwd(), "storage", "playlists")
@@ -125,7 +126,11 @@ async def save_current_queue(ctx: InteractionContext, playlist_name: str) -> Non
         await ctx.send("⚠️ 儲存播放清單時發生系統錯誤，請稍後再試。")
 
 
-async def play_saved_playlist(ctx: InteractionContext, playlist_name: str) -> None:
+async def play_saved_playlist(
+    ctx: InteractionContext,
+    playlist_name: str,
+    search_service: Any | None = None,
+) -> None:
     """
     讀取並播放使用者先前儲存的播放清單。
 
@@ -135,6 +140,7 @@ async def play_saved_playlist(ctx: InteractionContext, playlist_name: str) -> No
     Args:
         ctx (InteractionContext): 封裝了 Discord 互動狀態的上下文物件。
         playlist_name (str): 欲載入的播放清單名稱。
+        search_service (Any | None, optional): 可供固定播放器面板點歌按鈕使用的搜尋服務。
     """
     from music.player import get_player
 
@@ -178,7 +184,7 @@ async def play_saved_playlist(ctx: InteractionContext, playlist_name: str) -> No
         await voice_state.channel.connect()
 
     msg = await ctx.send(f"🔄 正在載入播放清單「**{playlist_name}**」...")
-    player = get_player(ctx)
+    player = get_player(ctx, search_service=search_service)
 
     # 將反序列化的 JSON 字典重組為播放器所需的 song_info 格式
     for song in selected_playlist:

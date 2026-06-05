@@ -28,4 +28,8 @@ class PlayPlaylistCommandMixin:
             配合新的儲存架構，此指令會讀取 `storage/playlists/` 目錄下以 `{user_id}_{playlist_name}.json`
             命名的獨立檔案。佇列中的網址會在播放器迴圈進行串流解析時即時處理。
         """
-        await play_saved_playlist(InteractionContext(interaction), playlist_name)
+        await play_saved_playlist(
+            InteractionContext(interaction),
+            playlist_name,
+            search_service=self.youtube_service,
+        )

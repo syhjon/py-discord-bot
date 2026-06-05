@@ -8,7 +8,7 @@
 """
 
 from core.context import InteractionContext
-from music.player import get_player, players
+from music.player import get_existing_player
 from music.utils import format_time
 
 
@@ -24,7 +24,10 @@ async def pause_playback(ctx: InteractionContext) -> None:
     """
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
-        get_player(ctx).pause_time()
+        player = get_existing_player(ctx)
+        if player:
+            player.pause_time()
+            await player.refresh_public_panel("⏸️ 已暫停播放。")
         await ctx.send("⏸️ 已暫停播放。")
 
 
@@ -40,33 +43,29 @@ async def resume_playback(ctx: InteractionContext) -> None:
     """
     if ctx.voice_client and ctx.voice_client.is_paused():
         ctx.voice_client.resume()
-        get_player(ctx).resume_time()
+        player = get_existing_player(ctx)
+        if player:
+            player.resume_time()
+            await player.refresh_public_panel("▶️ 已繼續播放。")
         await ctx.send("▶️ 已繼續播放。")
 
 
 async def stop_playback(ctx: InteractionContext) -> None:
     """
-    停止播放音樂 (實質為凍結狀態的暫停)。
+    停止播放音樂並清理播放器資源。
 
-    此處的設計選擇不直接清空佇列 (Queue) 或中斷連線，而是透過暫停來達成
-    「停止但保留狀態」的效果。讓使用者可以在停止後，隨時恢復原本的播放清單。
+    此方法會停止目前音訊、清空佇列與歷史紀錄、刪除或停用固定播放器面板，
+    並中斷語音連線以釋放 FFmpeg 與 yt-dlp 相關資源。
 
     Args:
         ctx (InteractionContext): 封裝了 Discord 互動狀態的上下文物件。
     """
-    if ctx.voice_client:
-        if ctx.voice_client.is_playing():
-            ctx.voice_client.pause()
-            # 確保該伺服器的播放器存在才呼叫 pause_time
-            if ctx.guild.id in players:
-                players[ctx.guild.id].pause_time()
-            await ctx.send("⏹️ 播放已停止，目前歌曲與後續佇列已完整保留。")
-        elif ctx.voice_client.is_paused():
-            await ctx.send("🎵 音樂目前已經是停止狀態。")
-        else:
-            await ctx.send("❌ 目前沒有任何歌曲正在播放。")
-    else:
-        await ctx.send("❌ 機器人目前不在語音頻道中。")
+    player = get_existing_player(ctx)
+    if not player:
+        return await ctx.send("❌ 目前沒有可停止的播放器。")
+
+    await player.shutdown()
+    await ctx.send("⏹️ 播放器已停止並釋放資源。")
 
 
 async def skip_track(ctx: InteractionContext) -> None:
@@ -80,10 +79,8 @@ async def skip_track(ctx: InteractionContext) -> None:
     Args:
         ctx (InteractionContext): 封裝了 Discord 互動狀態的上下文物件。
     """
-    if ctx.voice_client and (
-        ctx.voice_client.is_playing() or ctx.voice_client.is_paused()
-    ):
-        ctx.voice_client.stop()
+    player = get_existing_player(ctx)
+    if player and player.request_next_track():
         await ctx.send("⏭️ 已跳過歌曲！")
     else:
         await ctx.send("目前沒有播放任何歌曲可以跳過。")
@@ -101,26 +98,12 @@ async def play_previous(ctx: InteractionContext) -> None:
     Args:
         ctx (InteractionContext): 封裝了 Discord 互動狀態的上下文物件。
     """
-    player = get_player(ctx)
+    player = get_existing_player(ctx)
+    if not player:
+        return await ctx.send("目前沒有播放器紀錄。")
 
-    if not player.history:
+    if not player.request_previous_track():
         return await ctx.send("沒有上一首歌曲的紀錄。")
-
-    # 取出上一首歌
-    last_song = player.history.pop()
-
-    # 將現在這首歌放回佇列的第一順位，以便未來還能播放到
-    if player.current:
-        player.queue.insert(0, player.current)
-
-    # 將上一首歌指定為準備播放的目標
-    player.current = last_song
-
-    # 中斷當前播放音訊，觸發 Player 主迴圈讀取新的 current 歌曲
-    if ctx.voice_client and (
-        ctx.voice_client.is_playing() or ctx.voice_client.is_paused()
-    ):
-        ctx.voice_client.stop()
 
     await ctx.send("⏮️ 播放上一首歌曲。")
 
@@ -141,18 +124,19 @@ async def seek_track(ctx: InteractionContext, seconds: int) -> None:
     if seconds is None or seconds < 0:
         return await ctx.send("請指定要跳轉的有效時間 (秒數)。")
 
-    player = get_player(ctx)
-
-    if not player.current or not ctx.voice_client or not ctx.voice_client.is_playing():
+    player = get_existing_player(ctx)
+    if not player:
         return await ctx.send("目前沒有歌曲正在播放。")
 
-    # 設定跳轉的秒數偏移量
-    player.seek_offset = seconds
+    if not player.current or not ctx.voice_client:
+        return await ctx.send("目前沒有歌曲正在播放。")
 
-    # 將當前歌曲重新放回佇列第一順位
-    player.queue.insert(0, player.current)
+    if not (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
+        return await ctx.send("目前沒有歌曲正在播放。")
 
     # 強制停止目前音訊，觸發主迴圈以新的偏移量重新播放該歌曲
-    ctx.voice_client.stop()
+    if not player.request_seek(seconds):
+        return await ctx.send("目前沒有歌曲可以跳轉。")
 
+    await player.refresh_public_panel(f"⏩ 已跳轉至 {format_time(seconds)}。")
     await ctx.send(f"⏩ 已跳轉至 {format_time(seconds)}。")

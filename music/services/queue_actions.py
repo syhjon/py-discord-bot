@@ -9,7 +9,7 @@
 import random
 
 from core.context import InteractionContext
-from music.player import get_player
+from music.player import get_existing_player
 from music.utils import format_time
 
 
@@ -23,7 +23,10 @@ async def debug_queue(ctx: InteractionContext) -> None:
     Args:
         ctx (InteractionContext): 封裝了 Discord 互動狀態的上下文物件。
     """
-    player = get_player(ctx)
+    player = get_existing_player(ctx)
+    if not player:
+        return await ctx.send("目前沒有任何播放器佇列。")
+
     print(f"目前佇列: {player.queue}")
     await ctx.send("已在終端機印出目前 Queue 的狀態。")
 
@@ -37,8 +40,15 @@ async def clear_queue(ctx: InteractionContext) -> None:
     Args:
         ctx (InteractionContext): 封裝了 Discord 互動狀態的上下文物件。
     """
-    player = get_player(ctx)
+    player = get_existing_player(ctx)
+    if not player:
+        return await ctx.send("目前沒有可清空的播放佇列。")
+
     player.queue.clear()
+    if player.current:
+        await player.refresh_public_panel("🗑️ 播放佇列已清空。")
+    else:
+        await player.shutdown()
     await ctx.send("🗑️ 播放佇列已清空。")
 
 
@@ -52,7 +62,9 @@ async def show_queue(ctx: InteractionContext) -> None:
     Args:
         ctx (InteractionContext): 封裝了 Discord 互動狀態的上下文物件。
     """
-    player = get_player(ctx)
+    player = get_existing_player(ctx)
+    if not player:
+        return await ctx.send("目前沒有任何歌曲在佇列中。")
 
     if len(player.queue) == 0:
         return await ctx.send("目前沒有任何歌曲在佇列中。")
@@ -83,7 +95,9 @@ async def remove_from_queue(ctx: InteractionContext, index: int) -> None:
     if not index:
         return await ctx.send("請提供要刪除的歌曲位置。\n用法: /remove <編號>")
 
-    player = get_player(ctx)
+    player = get_existing_player(ctx)
+    if not player:
+        return await ctx.send("目前播放佇列是空的。")
 
     if not player.queue:
         return await ctx.send("目前播放佇列是空的。")
@@ -96,6 +110,7 @@ async def remove_from_queue(ctx: InteractionContext, index: int) -> None:
 
     # index - 1 將 1-based index 轉換回 Python 原生的 0-based index 進行 pop 操作
     removed_song = player.queue.pop(index - 1)
+    await player.refresh_public_panel(f"🗑️ 已移除：{removed_song['title']}")
     await ctx.send(f"🗑️ 已從播放清單中刪除第 {index} 首歌：{removed_song['title']}")
 
 
@@ -109,12 +124,15 @@ async def shuffle_queue(ctx: InteractionContext) -> None:
     Args:
         ctx (InteractionContext): 封裝了 Discord 互動狀態的上下文物件。
     """
-    player = get_player(ctx)
+    player = get_existing_player(ctx)
+    if not player:
+        return await ctx.send("目前沒有可隨機播放的佇列。")
 
     if len(player.queue) < 2:
         return await ctx.send("佇列中歌曲太少，無法隨機播放。")
 
     random.shuffle(player.queue)
+    await player.refresh_public_panel("🔀 佇列已隨機打亂。")
     await ctx.send("🔀 佇列已隨機打亂。")
 
 
@@ -135,7 +153,9 @@ async def jump_to_index(ctx: InteractionContext, index: int) -> None:
     if not index:
         return await ctx.send("請指定要跳轉的有效歌曲編號。")
 
-    player = get_player(ctx)
+    player = get_existing_player(ctx)
+    if not player:
+        return await ctx.send("目前沒有播放佇列可以跳轉。")
 
     # 防呆：檢查輸入的索引值是否在有效範圍內
     if index < 1 or index > len(player.queue):
@@ -149,6 +169,8 @@ async def jump_to_index(ctx: InteractionContext, index: int) -> None:
     if ctx.voice_client and (
         ctx.voice_client.is_playing() or ctx.voice_client.is_paused()
     ):
-        ctx.voice_client.stop()
+        player.request_next_track()
+    else:
+        await player.refresh_public_panel(f"🦘 已跳轉至第 {index} 首。")
 
     await ctx.send(f"🦘 已跳轉至第 {index} 首。")

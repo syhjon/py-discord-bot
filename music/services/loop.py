@@ -7,7 +7,7 @@
 """
 
 from core.context import InteractionContext
-from music.player import get_player
+from music.player import get_existing_player
 
 
 async def set_loop_mode(ctx: InteractionContext, mode: str) -> None:
@@ -25,7 +25,9 @@ async def set_loop_mode(ctx: InteractionContext, mode: str) -> None:
             - "all" 或 "queue": 整個播放佇列循環
     """
     # 取得當前伺服器綁定的音樂播放器實例
-    player = get_player(ctx)
+    player = get_existing_player(ctx)
+    if not player:
+        return await ctx.send("目前沒有可設定循環模式的播放器。")
 
     # 將輸入轉為小寫以統一格式，若未提供則預設為空字串，避免防呆判斷出錯
     mode = mode.lower() if mode else ""
@@ -52,4 +54,5 @@ async def set_loop_mode(ctx: InteractionContext, mode: str) -> None:
     )
 
     # 傳送設定成功的確認訊息
+    await player.refresh_public_panel(f"🔁 循環模式已設定為：{mode_str}。")
     await ctx.send(f"🔁 循環模式已設定為：{mode_str}。")

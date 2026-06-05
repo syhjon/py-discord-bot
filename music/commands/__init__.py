@@ -19,6 +19,7 @@ from .lyrics import LyricsCommandMixin
 from .mute import MuteCommandMixin
 from .nowplaying import NowplayingCommandMixin
 from .pause import PauseCommandMixin
+from .player import PlayerCommandMixin
 from .playat import PlayatCommandMixin
 from .playplaylist import PlayPlaylistCommandMixin
 from .previous import PreviousCommandMixin
@@ -50,6 +51,7 @@ __all__ = [
     "MuteCommandMixin",
     "NowplayingCommandMixin",
     "PauseCommandMixin",
+    "PlayerCommandMixin",
     "PlayatCommandMixin",
     "PlayPlaylistCommandMixin",
     "PreviousCommandMixin",

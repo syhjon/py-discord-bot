@@ -10,7 +10,7 @@
 import discord
 
 from core.context import InteractionContext
-from music.player import get_player
+from music.player import get_existing_player
 from music.utils import create_progress_bar, format_time
 
 
@@ -25,10 +25,10 @@ async def show_nowplaying(ctx: InteractionContext) -> None:
     Args:
         ctx (InteractionContext): 封裝了 Discord 互動狀態的上下文物件。
     """
-    player = get_player(ctx)
+    player = get_existing_player(ctx)
 
     # 防呆：確認目前是否有歌曲正在播放
-    if not player.current:
+    if not player or not player.current:
         return await ctx.send("目前沒有任何歌曲正在播放。")
 
     # 取得當前播放時間與總時長
@@ -91,10 +91,10 @@ async def show_progress(ctx: InteractionContext) -> None:
     Args:
         ctx (InteractionContext): 封裝了 Discord 互動狀態的上下文物件。
     """
-    player = get_player(ctx)
+    player = get_existing_player(ctx)
 
     # 防呆：確認目前是否有歌曲正在播放
-    if not player.current:
+    if not player or not player.current:
         return await ctx.send("目前沒有任何歌曲正在播放。")
 
     # 取得時間資訊並建立進度條
