@@ -4,7 +4,6 @@ from discord import app_commands
 
 from core.context import InteractionContext
 from music.player import get_existing_player
-from music.ui import PlayerControls
 
 
 class PlayerCommandMixin:
@@ -33,11 +32,6 @@ class PlayerCommandMixin:
             )
 
         player.update_context(ctx, search_service=self.youtube_service)
-        embed = player.build_panel_embed(status_msg="已叫出私人播放器面板。")
-        view = PlayerControls(
-            player,
-            owner_id=interaction.user.id,
-            page=player.panel_page,
-            timeout=None,
-        )
-        await ctx.send(embed=embed, view=view)
+        panel = await player.show_private_panel(ctx, owner_id=interaction.user.id)
+        if panel is None:
+            await ctx.send("播放器已停止，請重新點歌後再叫出面板。")

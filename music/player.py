@@ -58,6 +58,9 @@ class MusicPlayer:
 
         self.ytdl = create_player_ytdl()
         self.panel_message: discord.Message | None = None
+        self.panel_view: discord.ui.View | None = None
+        self.private_panel_message: discord.Message | None = None
+        self.private_panel_view: discord.ui.View | None = None
         self.panel_page = 0
         self.panel_lock = asyncio.Lock()
         self.closed = False
@@ -311,32 +314,96 @@ class MusicPlayer:
 
         Notes:
             若面板訊息仍存在，永遠優先編輯原訊息；只有原訊息被刪除或尚未建立時才會重新發送。
+            若目前存在私人面板，會先移除私人面板，確保同一時間只有一個播放器介面可操作。
         """
         if self.closed or not self.is_active:
             return
 
         async with self.panel_lock:
+            await self._retire_private_panel_unlocked()
+
             self.panel_page = self.clamp_queue_page(self.panel_page)
             embed = self.build_panel_embed(page=self.panel_page, status_msg=status_msg)
             view = PlayerControls(self, page=self.panel_page)
 
             if self.panel_message:
+                previous_view = self.panel_view
                 try:
                     await self.panel_message.edit(embed=embed, view=view)
+                    self._release_panel_view(previous_view)
+                    self.panel_view = view
                     return
                 except discord.NotFound:
+                    self._release_panel_view(previous_view)
                     self.panel_message = None
+                    self.panel_view = None
                 except discord.HTTPException as e:
+                    self._release_panel_view(view)
                     log.warning(f"更新播放器面板失敗: {e}")
                     return
 
             if not self.channel:
+                self._release_panel_view(view)
                 return
 
+            self.panel_view = view
             try:
                 self.panel_message = await self.channel.send(embed=embed, view=view)
             except discord.HTTPException as e:
+                self.panel_view = None
+                self._release_panel_view(view)
                 log.warning(f"建立播放器面板失敗: {e}")
+
+    async def show_private_panel(
+        self,
+        ctx: InteractionContext,
+        *,
+        owner_id: int,
+    ) -> discord.Message | None:
+        """建立僅指定使用者可操作的私人播放器面板。
+
+        Args:
+            ctx (InteractionContext): 用於發送私人面板的互動上下文。
+            owner_id (int): 允許操作此私人面板的 Discord 使用者 ID。
+
+        Returns:
+            discord.Message | None: 成功建立時回傳面板訊息；播放器已停止時回傳 None。
+
+        Notes:
+            建立私人面板前會先移除目前的公開或私人面板，避免同時存在兩個可操作的播放器介面。
+        """
+        if self.closed or not self.is_active:
+            return None
+
+        async with self.panel_lock:
+            if self.closed or not self.is_active:
+                return None
+
+            await self._retire_public_panel_unlocked()
+            await self._retire_private_panel_unlocked()
+
+            self.panel_page = self.clamp_queue_page(self.panel_page)
+            embed = self.build_panel_embed(
+                page=self.panel_page,
+                status_msg="已叫出私人播放器面板。",
+            )
+            view = PlayerControls(
+                self,
+                owner_id=owner_id,
+                page=self.panel_page,
+                timeout=None,
+            )
+
+            self.private_panel_view = view
+            try:
+                message = await ctx.send(embed=embed, view=view)
+            except discord.HTTPException:
+                self.private_panel_view = None
+                self._release_panel_view(view)
+                raise
+
+            self.private_panel_message = message
+            return message
 
     async def hide_public_panel(self) -> None:
         """讓公開播放器面板不可見或不可控制。
@@ -346,27 +413,76 @@ class MusicPlayer:
 
         Notes:
             系統會優先刪除訊息以達到不可見；若 Discord 權限或 API 狀態不允許刪除，
-            則退回編輯為停用狀態，確保使用者不能再操作舊面板。
+            則退回清空訊息內容與控制元件，確保使用者不能再操作舊面板。
         """
+        async with self.panel_lock:
+            await self._retire_public_panel_unlocked()
+
+    async def hide_all_panels(self) -> None:
+        """移除所有播放器控制面板並釋放 View 引用。"""
+        async with self.panel_lock:
+            await self._retire_public_panel_unlocked()
+            await self._retire_private_panel_unlocked()
+
+    async def _retire_public_panel_unlocked(self) -> None:
+        """在已持有 panel_lock 時移除公開面板。"""
         message = self.panel_message
+        view = self.panel_view
+        if not message and not view:
+            return
+
         self.panel_message = None
+        self.panel_view = None
+        await self._retire_panel_message(message, view)
+
+    async def _retire_private_panel_unlocked(self) -> None:
+        """在已持有 panel_lock 時移除私人面板。"""
+        message = self.private_panel_message
+        view = self.private_panel_view
+        if not message and not view:
+            return
+
+        self.private_panel_message = None
+        self.private_panel_view = None
+        await self._retire_panel_message(message, view)
+
+    def _release_panel_view(self, view: discord.ui.View | None) -> None:
+        """停止舊 View，讓 Discord.py 不再派發舊按鈕互動。"""
+        if not view:
+            return
+
+        try:
+            view.stop()
+        except Exception:
+            log.debug("停止播放器面板 View 時發生非預期錯誤。", exc_info=True)
+
+    async def _retire_panel_message(
+        self,
+        message: discord.Message | None,
+        view: discord.ui.View | None,
+    ) -> None:
+        """刪除或清空舊面板訊息，並停止 View 釋放引用。"""
+        self._release_panel_view(view)
         if not message:
+            gc.collect()
             return
 
         try:
             await message.delete()
+            gc.collect()
             return
         except discord.NotFound:
+            gc.collect()
             return
         except discord.HTTPException:
             pass
 
-        disabled_view = PlayerControls(self, page=self.panel_page)
-        disabled_view.disable_all_controls()
         try:
-            await message.edit(content="播放器已停止。", embed=None, view=disabled_view)
+            await message.edit(content="\u200b", embed=None, view=None)
         except discord.HTTPException:
             pass
+        finally:
+            gc.collect()
 
     def request_next_track(self) -> bool:
         """要求播放器跳到下一首歌曲。
@@ -472,7 +588,7 @@ class MusicPlayer:
         if hasattr(self, "lyrics_task") and self.lyrics_task:
             self.lyrics_task.cancel()
 
-        await self.hide_public_panel()
+        await self.hide_all_panels()
 
         # 安全停止音樂與斷開連線，這會讓 discord.py 正常發送 SIGTERM 給 FFmpeg
         if self.guild.voice_client:
